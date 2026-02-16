@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codex-sdk-python"
+version = "0.1.0"
+description = "Python SDK wrapper around codex exec with bundled skill/docs scaffolding CLI."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  { name = "Codex Local SDK Maintainers" }
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Operating System :: OS Independent",
+]
+
+[project.scripts]
+codex-sdk = "codex_sdk_python.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["codex_local_sdk*", "codex_sdk_python*"]
+
+[tool.setuptools.package-data]
+codex_sdk_python = [
+  "data/skills/codex-local-sdk-usage/**/*",
+  "data/docs/documentation/**/*",
+  "data/docs/html documentation/**/*",
+]

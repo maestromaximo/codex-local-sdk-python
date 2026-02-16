@@ -1,0 +1,447 @@
+from __future__ import annotations
+
+import json
+import os
+import tempfile
+import threading
+import time
+from abc import ABC, abstractmethod
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+
+
+@dataclass(frozen=True)
+class SessionTurnRecord:
+    timestamp: float
+    operation: str
+    prompt_preview: str | None = None
+    return_code: int | None = None
+    turn_status: str | None = None
+    duration_seconds: float | None = None
+    message_preview: str | None = None
+
+
+@dataclass(frozen=True)
+class SessionRecord:
+    session_id: str
+    session_name: str
+    created_at: float
+    updated_at: float
+    last_turn_status: str | None = None
+    turn_count: int = 0
+    success_count: int = 0
+    failure_count: int = 0
+    turns: tuple[SessionTurnRecord, ...] = field(default_factory=tuple)
+
+
+class SessionStore(ABC):
+    """Abstraction for persisting logical session-name -> codex session-id mappings."""
+
+    @abstractmethod
+    def get(self, name: str) -> str | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def set(self, name: str, session_id: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def delete(self, name: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def all(self) -> dict[str, str]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_record(self, name: str) -> SessionRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def set_record(self, name: str, record: SessionRecord) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_records(self) -> dict[str, SessionRecord]:
+        raise NotImplementedError
+
+
+class InMemorySessionStore(SessionStore):
+    """Thread-safe in-memory session store."""
+
+    def __init__(self, initial: dict[str, str] | None = None, max_turn_history: int = 20) -> None:
+        self._lock = threading.Lock()
+        self.max_turn_history = max(1, max_turn_history)
+        now = time.time()
+        self._records: dict[str, SessionRecord] = {
+            name: SessionRecord(
+                session_id=session_id,
+                session_name=name,
+                created_at=now,
+                updated_at=now,
+            )
+            for name, session_id in (initial or {}).items()
+        }
+
+    def get(self, name: str) -> str | None:
+        record = self.get_record(name)
+        return record.session_id if record is not None else None
+
+    def set(self, name: str, session_id: str) -> None:
+        with self._lock:
+            existing = self._records.get(name)
+            now = time.time()
+            if existing is None:
+                self._records[name] = SessionRecord(
+                    session_id=session_id,
+                    session_name=name,
+                    created_at=now,
+                    updated_at=now,
+                )
+                return
+
+            self._records[name] = SessionRecord(
+                session_id=session_id,
+                session_name=name,
+                created_at=existing.created_at,
+                updated_at=now,
+                last_turn_status=existing.last_turn_status,
+                turn_count=existing.turn_count,
+                success_count=existing.success_count,
+                failure_count=existing.failure_count,
+                turns=existing.turns,
+            )
+
+    def delete(self, name: str) -> None:
+        with self._lock:
+            self._records.pop(name, None)
+
+    def all(self) -> dict[str, str]:
+        with self._lock:
+            return {name: record.session_id for name, record in self._records.items()}
+
+    def get_record(self, name: str) -> SessionRecord | None:
+        with self._lock:
+            return self._records.get(name)
+
+    def set_record(self, name: str, record: SessionRecord) -> None:
+        with self._lock:
+            turns = tuple(record.turns[-self.max_turn_history :])
+            normalized = SessionRecord(
+                session_id=record.session_id,
+                session_name=name,
+                created_at=record.created_at,
+                updated_at=record.updated_at,
+                last_turn_status=record.last_turn_status,
+                turn_count=record.turn_count,
+                success_count=record.success_count,
+                failure_count=record.failure_count,
+                turns=turns,
+            )
+            self._records[name] = normalized
+
+    def list_records(self) -> dict[str, SessionRecord]:
+        with self._lock:
+            return dict(self._records)
+
+
+class JsonFileSessionStore(SessionStore):
+    """Thread-safe and process-safe JSON-file-backed store with schema migration."""
+
+    SCHEMA_VERSION = 2
+
+    def __init__(self, file_path: str, max_turn_history: int = 20) -> None:
+        self.file_path = file_path
+        self.max_turn_history = max(1, max_turn_history)
+        self._thread_lock = threading.Lock()
+
+    def get(self, name: str) -> str | None:
+        record = self.get_record(name)
+        return record.session_id if record is not None else None
+
+    def set(self, name: str, session_id: str) -> None:
+        with self._acquire_locks():
+            records = self._load_records_locked()
+            now = time.time()
+            existing = records.get(name)
+            if existing is None:
+                records[name] = SessionRecord(
+                    session_id=session_id,
+                    session_name=name,
+                    created_at=now,
+                    updated_at=now,
+                )
+            else:
+                records[name] = SessionRecord(
+                    session_id=session_id,
+                    session_name=name,
+                    created_at=existing.created_at,
+                    updated_at=now,
+                    last_turn_status=existing.last_turn_status,
+                    turn_count=existing.turn_count,
+                    success_count=existing.success_count,
+                    failure_count=existing.failure_count,
+                    turns=existing.turns,
+                )
+            self._write_records_locked(records)
+
+    def delete(self, name: str) -> None:
+        with self._acquire_locks():
+            records = self._load_records_locked()
+            records.pop(name, None)
+            self._write_records_locked(records)
+
+    def all(self) -> dict[str, str]:
+        with self._acquire_locks():
+            records = self._load_records_locked()
+            return {name: record.session_id for name, record in records.items()}
+
+    def get_record(self, name: str) -> SessionRecord | None:
+        with self._acquire_locks():
+            records = self._load_records_locked()
+            return records.get(name)
+
+    def set_record(self, name: str, record: SessionRecord) -> None:
+        with self._acquire_locks():
+            records = self._load_records_locked()
+            turns = tuple(record.turns[-self.max_turn_history :])
+            normalized = SessionRecord(
+                session_id=record.session_id,
+                session_name=name,
+                created_at=record.created_at,
+                updated_at=record.updated_at,
+                last_turn_status=record.last_turn_status,
+                turn_count=record.turn_count,
+                success_count=record.success_count,
+                failure_count=record.failure_count,
+                turns=turns,
+            )
+            records[name] = normalized
+            self._write_records_locked(records)
+
+    def list_records(self) -> dict[str, SessionRecord]:
+        with self._acquire_locks():
+            records = self._load_records_locked()
+            return dict(records)
+
+    @contextmanager
+    def _acquire_locks(self):
+        with self._thread_lock:
+            with self._file_lock():
+                yield
+
+    @contextmanager
+    def _file_lock(self):
+        lock_path = f"{self.file_path}.lock"
+        parent = os.path.dirname(lock_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+
+        with open(lock_path, "a+b") as lock_file:
+            if os.name == "nt":
+                import msvcrt  # type: ignore
+
+                lock_file.seek(0, os.SEEK_END)
+                if lock_file.tell() == 0:
+                    lock_file.write(b"\0")
+                    lock_file.flush()
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+                try:
+                    yield
+                finally:
+                    lock_file.seek(0)
+                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl  # type: ignore
+
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+    def _load_records_locked(self) -> dict[str, SessionRecord]:
+        records, migrated = self._read_records_locked()
+        if migrated:
+            self._write_records_locked(records)
+        return records
+
+    def _read_records_locked(self) -> tuple[dict[str, SessionRecord], bool]:
+        if not os.path.exists(self.file_path):
+            return {}, False
+
+        try:
+            with open(self.file_path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            return {}, False
+
+        if not isinstance(payload, dict):
+            return {}, False
+
+        # Schema v2 payload.
+        if payload.get("schema_version") == self.SCHEMA_VERSION and isinstance(payload.get("records"), dict):
+            raw_records = payload["records"]
+            records: dict[str, SessionRecord] = {}
+            for name, raw_record in raw_records.items():
+                parsed = self._parse_record(name, raw_record)
+                if parsed is not None:
+                    records[name] = parsed
+            return records, False
+
+        # Legacy payload: {"name": "session_id"}.
+        is_legacy = all(isinstance(k, str) and isinstance(v, str) for k, v in payload.items())
+        if is_legacy:
+            now = time.time()
+            records = {
+                name: SessionRecord(
+                    session_id=session_id,
+                    session_name=name,
+                    created_at=now,
+                    updated_at=now,
+                )
+                for name, session_id in payload.items()
+            }
+            return records, True
+
+        return {}, False
+
+    def _write_records_locked(self, records: dict[str, SessionRecord]) -> None:
+        payload = {
+            "schema_version": self.SCHEMA_VERSION,
+            "records": {
+                name: self._record_to_json(record)
+                for name, record in records.items()
+            },
+        }
+
+        parent = os.path.dirname(self.file_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+
+        fd, temp_path = tempfile.mkstemp(prefix=".session-store-", suffix=".json", dir=parent or None)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2, sort_keys=True)
+                f.write("\n")
+            os.replace(temp_path, self.file_path)
+        finally:
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
+
+    def _parse_record(self, name: str, raw: object) -> SessionRecord | None:
+        if not isinstance(raw, dict):
+            return None
+
+        session_id = raw.get("session_id")
+        if not isinstance(session_id, str) or not session_id.strip():
+            return None
+
+        created_at = self._as_float(raw.get("created_at"), fallback=time.time())
+        updated_at = self._as_float(raw.get("updated_at"), fallback=created_at)
+        last_turn_status = raw.get("last_turn_status")
+        if not isinstance(last_turn_status, str):
+            last_turn_status = None
+
+        turn_count = self._as_int(raw.get("turn_count"), fallback=0)
+        success_count = self._as_int(raw.get("success_count"), fallback=0)
+        failure_count = self._as_int(raw.get("failure_count"), fallback=0)
+
+        turns: list[SessionTurnRecord] = []
+        raw_turns = raw.get("turns")
+        if isinstance(raw_turns, list):
+            for raw_turn in raw_turns:
+                parsed_turn = self._parse_turn(raw_turn)
+                if parsed_turn is not None:
+                    turns.append(parsed_turn)
+
+        turns_tuple = tuple(turns[-self.max_turn_history :])
+        return SessionRecord(
+            session_id=session_id,
+            session_name=name,
+            created_at=created_at,
+            updated_at=updated_at,
+            last_turn_status=last_turn_status,
+            turn_count=max(0, turn_count),
+            success_count=max(0, success_count),
+            failure_count=max(0, failure_count),
+            turns=turns_tuple,
+        )
+
+    def _parse_turn(self, raw: object) -> SessionTurnRecord | None:
+        if not isinstance(raw, dict):
+            return None
+
+        operation = raw.get("operation")
+        if not isinstance(operation, str) or not operation.strip():
+            return None
+
+        return SessionTurnRecord(
+            timestamp=self._as_float(raw.get("timestamp"), fallback=time.time()),
+            operation=operation,
+            prompt_preview=self._as_optional_str(raw.get("prompt_preview")),
+            return_code=self._as_optional_int(raw.get("return_code")),
+            turn_status=self._as_optional_str(raw.get("turn_status")),
+            duration_seconds=self._as_optional_float(raw.get("duration_seconds")),
+            message_preview=self._as_optional_str(raw.get("message_preview")),
+        )
+
+    def _record_to_json(self, record: SessionRecord) -> dict:
+        turns = [
+            {
+                "timestamp": turn.timestamp,
+                "operation": turn.operation,
+                "prompt_preview": turn.prompt_preview,
+                "return_code": turn.return_code,
+                "turn_status": turn.turn_status,
+                "duration_seconds": turn.duration_seconds,
+                "message_preview": turn.message_preview,
+            }
+            for turn in record.turns[-self.max_turn_history :]
+        ]
+
+        return {
+            "session_id": record.session_id,
+            "session_name": record.session_name,
+            "created_at": record.created_at,
+            "updated_at": record.updated_at,
+            "last_turn_status": record.last_turn_status,
+            "turn_count": record.turn_count,
+            "success_count": record.success_count,
+            "failure_count": record.failure_count,
+            "turns": turns,
+        }
+
+    @staticmethod
+    def _as_float(value: object, fallback: float) -> float:
+        if isinstance(value, (float, int)):
+            return float(value)
+        return fallback
+
+    @staticmethod
+    def _as_optional_float(value: object) -> float | None:
+        if isinstance(value, (float, int)):
+            return float(value)
+        return None
+
+    @staticmethod
+    def _as_int(value: object, fallback: int) -> int:
+        if isinstance(value, int):
+            return value
+        return fallback
+
+    @staticmethod
+    def _as_optional_int(value: object) -> int | None:
+        if isinstance(value, int):
+            return value
+        return None
+
+    @staticmethod
+    def _as_optional_str(value: object) -> str | None:
+        if isinstance(value, str):
+            return value
+        return None

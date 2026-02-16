@@ -1,0 +1,1 @@
+recursive-include src/codex_sdk_python/data *

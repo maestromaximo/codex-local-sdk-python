@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex Local SDK Usage"
+  short_description: "Build scripts that consume Codex Local SDK APIs"
+  default_prompt: "Use $codex-local-sdk-usage to build or troubleshoot code that uses codex_local_sdk APIs."

@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SpawnCodex Python SDK Docs</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="assets/styles.css" rel="stylesheet">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <span class="logo">SpawnCodex</span>
+      <h1 class="title">Python SDK Docs</h1>
+      <p class="subtitle">Local Codex non-interactive client</p>
+
+      <div class="nav-group">
+        <p class="nav-group-label">Overview</p>
+        <a class="nav-link active" href="index.html">Home</a>
+        <a class="nav-link" href="getting-started.html">Getting Started</a>
+        <a class="nav-link" href="api-reference.html">API Reference</a>
+        <a class="nav-link" href="live-threads.html">Live Runs & Threads</a>
+        <a class="nav-link" href="examples.html">Examples Cookbook</a>
+        <a class="nav-link" href="testing-and-quality.html">Testing & Quality</a>
+      </div>
+
+      <div class="nav-group">
+        <p class="nav-group-label">Important Paths</p>
+        <a class="nav-link" href="api-reference.html#core-models"><code>codex_local_sdk/models.py</code></a>
+        <a class="nav-link" href="api-reference.html#session-stores"><code>codex_local_sdk/session_store.py</code></a>
+        <a class="nav-link" href="api-reference.html#core-client"><code>codex_local_sdk/client.py</code></a>
+        <a class="nav-link" href="testing-and-quality.html#test-suite"><code>tests/</code></a>
+      </div>
+    </aside>
+
+    <main class="main">
+      <section class="hero">
+        <span class="badge">Python SDK (Local)</span>
+        <h1>SpawnCodex SDK Documentation</h1>
+        <p>
+          A static, double-click documentation set for the local Python SDK wrapper around <code>codex exec</code>.
+          The SDK now supports sync + async execution, live streaming, retries/backoff, and persistent named sessions.
+        </p>
+      </section>
+
+      <section class="card-grid">
+        <article class="card">
+          <h3>Run Codex from Python</h3>
+          <p>Use <code>run()</code> and <code>run_prompt()</code> for deterministic non-interactive tasks.</p>
+        </article>
+        <article class="card">
+          <h3>Async API</h3>
+          <p>Use <code>run_async()</code>, <code>resume_async()</code>, and async live runs for asyncio workflows.</p>
+        </article>
+        <article class="card">
+          <h3>Stream Events Live</h3>
+          <p>Use <code>run_live()</code>/<code>run_live_async()</code> to consume JSONL events as they arrive.</p>
+        </article>
+        <article class="card">
+          <h3>Retry Policy</h3>
+          <p>Use <code>RetryPolicy</code> on <code>CodexLocalClient</code> for built-in backoff retries.</p>
+        </article>
+        <article class="card">
+          <h3>Telemetry Hooks</h3>
+          <p>Use <code>event_hook</code> to capture structured command/retry/live/session events.</p>
+        </article>
+        <article class="card">
+          <h3>Persistent Sessions</h3>
+          <p>Use <code>JsonFileSessionStore</code> with session names to resume across process restarts.</p>
+        </article>
+        <article class="card">
+          <h3>Schema Output</h3>
+          <p>Use <code>run_with_schema()</code> to constrain final output with JSON Schema.</p>
+        </article>
+      </section>
+
+      <section class="section">
+        <h2>SDK Capabilities</h2>
+        <ul>
+          <li>Typed request/result models with thread IDs, turn status, usage, and helper properties.</li>
+          <li>Sync and async execution methods for run/resume/thread flows.</li>
+          <li>Live streaming support for both <code>subprocess.Popen</code> and asyncio subprocess APIs.</li>
+          <li>Retry/backoff policy with jitter, timeout handling, and total retry-window limits.</li>
+          <li>Pluggable session stores: in-memory and JSON-file persistence.</li>
+          <li>Session metadata records with bounded turn history and legacy-file migration.</li>
+          <li>Structured observability events via <code>CodexClientEvent</code> + <code>event_hook</code>.</li>
+          <li>Large unit test suite covering sync, live, async, retries, and session-store behavior.</li>
+        </ul>
+      </section>
+
+      <section class="section">
+        <h2>Quick Start in 30 Seconds</h2>
+        <pre><code>from codex_local_sdk import CodexExecRequest, CodexLocalClient, RetryPolicy, SandboxMode
+
+client = CodexLocalClient(
+    retry_policy=RetryPolicy(max_attempts=3, initial_backoff_seconds=0.5, jitter_ratio=0.2),
+)
+
+result = client.run(
+    CodexExecRequest(
+        prompt="Summarize this repository in 5 bullets.",
+        sandbox=SandboxMode.READ_ONLY,
+    ),
+    timeout_seconds=120,
+)
+print(result.final_message)</code></pre>
+        <p class="muted">See full setup on the <a href="getting-started.html">Getting Started</a> page.</p>
+      </section>
+
+      <section class="section">
+        <h2>Documentation Structure</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Page</th>
+                <th>Purpose</th>
+                <th>Best For</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><a href="getting-started.html">Getting Started</a></td>
+                <td>Install, async setup, retries, and persistent sessions.</td>
+                <td>Initial SDK onboarding.</td>
+              </tr>
+              <tr>
+                <td><a href="api-reference.html">API Reference</a></td>
+                <td>Full class/method reference including async and stores.</td>
+                <td>Implementation and integration work.</td>
+              </tr>
+              <tr>
+                <td><a href="live-threads.html">Live Runs & Threads</a></td>
+                <td>Streaming, session continuation, and async live patterns.</td>
+                <td>Automation and orchestration.</td>
+              </tr>
+              <tr>
+                <td><a href="examples.html">Examples Cookbook</a></td>
+                <td>Scenario-based snippets and runnable example mapping.</td>
+                <td>Copy/paste starting points.</td>
+              </tr>
+              <tr>
+                <td><a href="testing-and-quality.html">Testing & Quality</a></td>
+                <td>Suite layout and quality checks for new features.</td>
+                <td>Contributors and maintainers.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <footer class="footer">
+        Built for local file browsing. Open <code>index.html</code> directly in your browser.
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

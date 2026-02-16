@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Testing & Quality - SpawnCodex Python SDK Docs</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="assets/styles.css" rel="stylesheet">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <span class="logo">SpawnCodex</span>
+      <h1 class="title">Python SDK Docs</h1>
+      <p class="subtitle">Local Codex non-interactive client</p>
+
+      <div class="nav-group">
+        <p class="nav-group-label">Overview</p>
+        <a class="nav-link" href="index.html">Home</a>
+        <a class="nav-link" href="getting-started.html">Getting Started</a>
+        <a class="nav-link" href="api-reference.html">API Reference</a>
+        <a class="nav-link" href="live-threads.html">Live Runs & Threads</a>
+        <a class="nav-link" href="examples.html">Examples Cookbook</a>
+        <a class="nav-link active" href="testing-and-quality.html">Testing & Quality</a>
+      </div>
+
+      <div class="nav-group">
+        <p class="nav-group-label">On This Page</p>
+        <a class="nav-link" href="#test-suite">Current Suite</a>
+        <a class="nav-link" href="#run-tests">Run Tests</a>
+        <a class="nav-link" href="#coverage-focus">Coverage Focus</a>
+        <a class="nav-link" href="#integration">Integration Tests</a>
+        <a class="nav-link" href="#ci-guidance">CI Guidance</a>
+      </div>
+    </aside>
+
+    <main class="main">
+      <section class="hero" id="test-suite">
+        <span class="badge">Quality</span>
+        <h1>Testing and Quality Guide</h1>
+        <p>
+          The suite is based on <code>unittest</code> and covers sync/async execution, retries/timeouts, live startup retries,
+          session metadata persistence, migration, locking, and observability hooks.
+        </p>
+      </section>
+
+      <section class="section" id="run-tests">
+        <h2>Run Unit Tests</h2>
+<pre><code>python3 -m unittest discover -s tests -p "test_*.py"</code></pre>
+        <p>Key files:</p>
+        <ul>
+          <li><code>tests/test_codex_local_sdk.py</code></li>
+          <li><code>tests/test_client_sync_extended.py</code></li>
+          <li><code>tests/test_client_live_extended.py</code></li>
+          <li><code>tests/test_models_and_sessions_extended.py</code></li>
+          <li><code>tests/test_async_retry_and_session_store.py</code></li>
+          <li><code>tests/test_v2_hardening.py</code></li>
+        </ul>
+      </section>
+
+      <section class="section" id="coverage-focus">
+        <h2>Coverage Focus</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Area</th><th>Scenarios</th><th>Outcome</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Retry engine</td><td>Exit-code retries, jitter behavior, max retry window cutoff.</td><td>Backoff behavior is deterministic and bounded.</td></tr>
+              <tr><td>Timeout support</td><td>Timeout result generation, retry-on-timeout enabled/disabled.</td><td>Timeout path is explicit and policy-driven.</td></tr>
+              <tr><td>Live startup retries</td><td>Launch exception retry, immediate-exit retry, no retry post-handle return.</td><td>Startup resilience without post-stream side effects.</td></tr>
+              <tr><td>Session metadata</td><td>Record updates, bounded history truncation, named-session continuation.</td><td>Persistent records remain compact and useful.</td></tr>
+              <tr><td>Migration + locking</td><td>Legacy file auto-migration, concurrent writer safety checks.</td><td>JSON store remains valid and forward-compatible.</td></tr>
+              <tr><td>Telemetry hooks</td><td>Attempt/retry/live/session events, hook exception swallowing.</td><td>Observability is rich and non-disruptive.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section" id="integration">
+        <h2>Real CLI Integration Tests</h2>
+        <p>Integration tests run real <code>codex exec</code> commands and are intentionally gated.</p>
+<pre><code>export CODEX_INTEGRATION=1
+export CODEX_API_KEY=your_key_here  # optional if local Codex auth session is already valid
+python3 -m unittest discover -s tests/integration -p "test_*.py"</code></pre>
+        <p>Integration test module:</p>
+        <ul>
+          <li><code>tests/integration/test_codex_cli_integration.py</code></li>
+        </ul>
+      </section>
+
+      <section class="section" id="ci-guidance">
+        <h2>CI Guidance</h2>
+        <ul>
+          <li><code>.github/workflows/unit.yml</code>: runs full unit suite on push and pull request.</li>
+          <li><code>.github/workflows/integration.yml</code>: manual <code>workflow_dispatch</code> run, secret-gated by <code>CODEX_API_KEY</code>.</li>
+          <li>Keep unit tests hermetic (mock CLI interactions).</li>
+          <li>Run integration tests only in controlled environments with secure credentials.</li>
+          <li>Document every new public API with tests covering success and failure paths.</li>
+        </ul>
+      </section>
+
+      <footer class="footer">Quality baseline now includes SDK v2 hardening coverage.</footer>
+    </main>
+  </div>
+</body>
+</html>

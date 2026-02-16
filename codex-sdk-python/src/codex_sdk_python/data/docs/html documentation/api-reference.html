@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>API Reference - SpawnCodex Python SDK Docs</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="assets/styles.css" rel="stylesheet">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <span class="logo">SpawnCodex</span>
+      <h1 class="title">Python SDK Docs</h1>
+      <p class="subtitle">Local Codex non-interactive client</p>
+
+      <div class="nav-group">
+        <p class="nav-group-label">Overview</p>
+        <a class="nav-link" href="index.html">Home</a>
+        <a class="nav-link" href="getting-started.html">Getting Started</a>
+        <a class="nav-link active" href="api-reference.html">API Reference</a>
+        <a class="nav-link" href="live-threads.html">Live Runs & Threads</a>
+        <a class="nav-link" href="examples.html">Examples Cookbook</a>
+        <a class="nav-link" href="testing-and-quality.html">Testing & Quality</a>
+      </div>
+
+      <div class="nav-group">
+        <p class="nav-group-label">On This Page</p>
+        <a class="nav-link" href="#exports">Exports</a>
+        <a class="nav-link" href="#core-models">Core Models</a>
+        <a class="nav-link" href="#session-stores">Session Stores</a>
+        <a class="nav-link" href="#core-client">CodexLocalClient</a>
+        <a class="nav-link" href="#telemetry">Telemetry</a>
+        <a class="nav-link" href="#live-run">Live Handles</a>
+        <a class="nav-link" href="#thread-session">Thread Session</a>
+        <a class="nav-link" href="#errors">Errors</a>
+      </div>
+    </aside>
+
+    <main class="main">
+      <section class="hero">
+        <span class="badge">Reference</span>
+        <h1>Python SDK API Reference</h1>
+        <p>Canonical interface for sync + async execution, retry/timeout control, session metadata persistence, and telemetry hooks.</p>
+      </section>
+
+      <section class="section" id="exports">
+        <h2>Package Exports</h2>
+        <pre><code>from codex_local_sdk import (
+    AsyncCodexLiveRun,
+    CodexClientEvent,
+    CodexLiveRun,
+    CodexLocalClient,
+    CodexThreadSession,
+    CodexError,
+    CodexExecFailedError,
+    CodexNotInstalledError,
+    CodexEvent,
+    CodexExecRequest,
+    CodexExecResult,
+    RetryPolicy,
+    SandboxMode,
+    SessionStore,
+    InMemorySessionStore,
+    JsonFileSessionStore,
+    SessionRecord,
+    SessionTurnRecord,
+)</code></pre>
+      </section>
+
+      <section class="section" id="core-models">
+        <h2>Core Models</h2>
+
+        <h3>CodexExecRequest</h3>
+        <p>Describes <code>codex exec</code> CLI options (prompt, sandbox, model/profile, schema/output flags, images, extra args).</p>
+
+        <h3>RetryPolicy</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>max_attempts</code></td><td>int</td><td>Total attempts (initial + retries).</td></tr>
+              <tr><td><code>initial_backoff_seconds</code></td><td>float</td><td>Base retry delay.</td></tr>
+              <tr><td><code>backoff_multiplier</code></td><td>float</td><td>Exponential growth factor.</td></tr>
+              <tr><td><code>max_backoff_seconds</code></td><td>float</td><td>Delay cap.</td></tr>
+              <tr><td><code>retry_on_exit_codes</code></td><td>tuple[int, ...] | None</td><td><code>None</code> retries any non-zero exit code.</td></tr>
+              <tr><td><code>jitter_ratio</code></td><td>float</td><td>Random jitter fraction applied to backoff delay.</td></tr>
+              <tr><td><code>max_total_retry_seconds</code></td><td>float | None</td><td>Caps total time spent retrying.</td></tr>
+              <tr><td><code>retry_on_timeouts</code></td><td>bool</td><td>Controls retry behavior for timeout failures.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>CodexExecResult</h3>
+        <p>Command result with return code, stdout/stderr, final message, events, thread id, turn status, usage, and duration.</p>
+      </section>
+
+      <section class="section" id="session-stores">
+        <h2>Session Stores</h2>
+        <p>Session stores map logical names to Codex session IDs and persist metadata/history records.</p>
+
+        <h3>SessionStore Interface</h3>
+        <ul>
+          <li><code>get(name)</code>, <code>set(name, session_id)</code>, <code>delete(name)</code>, <code>all()</code></li>
+          <li><code>get_record(name)</code>, <code>set_record(name, record)</code>, <code>list_records()</code></li>
+        </ul>
+
+        <h3>SessionRecord / SessionTurnRecord</h3>
+        <ul>
+          <li><code>SessionRecord</code>: session id/name, counters, timestamps, and bounded turn history.</li>
+          <li><code>SessionTurnRecord</code>: per-turn metadata (operation, prompt/message preview, return code, status, duration).</li>
+        </ul>
+
+        <h3>JsonFileSessionStore</h3>
+        <ul>
+          <li>Schema v2 payload with automatic migration from legacy <code>{name: session_id}</code> files.</li>
+          <li>Thread-safe + cross-process safe file locking.</li>
+          <li>Atomic writes via temp file + <code>os.replace</code>.</li>
+        </ul>
+      </section>
+
+      <section class="section" id="core-client">
+        <h2>CodexLocalClient</h2>
+
+        <h3>Constructor</h3>
+        <pre><code>CodexLocalClient(
+    codex_bin: str = "codex",
+    default_cwd: str | None = None,
+    default_env: dict[str, str] | None = None,
+    raise_on_error: bool = True,
+    retry_policy: RetryPolicy | None = None,
+    session_store: SessionStore | None = None,
+    event_hook: Callable[[CodexClientEvent], None] | None = None,
+)</code></pre>
+
+        <h3>Execution Methods</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Method</th><th>Returns</th><th>Notes</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>run(..., timeout_seconds=None)</code></td><td>CodexExecResult</td><td>Sync run with retry policy.</td></tr>
+              <tr><td><code>run_async(..., timeout_seconds=None)</code></td><td>awaitable[CodexExecResult]</td><td>Async wrapper around sync behavior.</td></tr>
+              <tr><td><code>run_prompt(..., api_key=None, timeout_seconds=None)</code></td><td>CodexExecResult</td><td>Prompt convenience wrapper.</td></tr>
+              <tr><td><code>run_prompt_async(...)</code></td><td>awaitable[CodexExecResult]</td><td>Async prompt wrapper.</td></tr>
+              <tr><td><code>run_with_schema(..., api_key=None, timeout_seconds=None)</code></td><td>CodexExecResult</td><td>Schema-constrained output.</td></tr>
+              <tr><td><code>run_with_schema_async(...)</code></td><td>awaitable[CodexExecResult]</td><td>Async schema wrapper.</td></tr>
+              <tr><td><code>start_thread(..., session_name=None, timeout_seconds=None)</code></td><td>tuple[CodexThreadSession, CodexExecResult]</td><td>Starts JSON thread and optionally records named session metadata.</td></tr>
+              <tr><td><code>start_thread_async(...)</code></td><td>awaitable[tuple[CodexThreadSession, CodexExecResult]]</td><td>Async thread start.</td></tr>
+              <tr><td><code>resume(..., session_name=None, timeout_seconds=None)</code></td><td>CodexExecResult</td><td>Sync continuation.</td></tr>
+              <tr><td><code>resume_async(...)</code></td><td>awaitable[CodexExecResult]</td><td>Async continuation.</td></tr>
+              <tr><td><code>run_live(...)</code> / <code>resume_live(...)</code></td><td>CodexLiveRun</td><td>Sync live streaming with startup retry support.</td></tr>
+              <tr><td><code>run_live_async(...)</code> / <code>resume_live_async(...)</code></td><td>awaitable[AsyncCodexLiveRun]</td><td>Async live streaming with startup retry support.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Session APIs</h3>
+        <ul>
+          <li><code>save_session</code>, <code>get_session_id</code>, <code>delete_session</code>, <code>list_sessions</code></li>
+          <li><code>get_session_record</code>, <code>list_session_records</code>, <code>open_session</code></li>
+        </ul>
+      </section>
+
+      <section class="section" id="telemetry">
+        <h2>Telemetry</h2>
+        <p>Pass <code>event_hook</code> to receive <code>CodexClientEvent</code> records.</p>
+        <pre><code>def on_event(event: CodexClientEvent) -> None:
+    print(event.type, event.operation, event.attempt, event.return_code)
+
+client = CodexLocalClient(event_hook=on_event)</code></pre>
+        <p>Event types include:</p>
+        <ul>
+          <li><code>attempt.started</code>, <code>attempt.failed</code>, <code>attempt.succeeded</code>, <code>retry.scheduled</code></li>
+          <li><code>live.started</code>, <code>live.startup_failed</code>, <code>live.startup_retried</code>, <code>live.event</code></li>
+          <li><code>session.updated</code></li>
+        </ul>
+      </section>
+
+      <section class="section" id="live-run">
+        <h2>Live Handles</h2>
+        <ul>
+          <li><code>CodexLiveRun</code>: <code>iter_events()</code>, <code>wait(timeout=None)</code>, <code>result()</code>, <code>terminate()</code>, <code>kill()</code>.</li>
+          <li><code>AsyncCodexLiveRun</code>: async equivalents <code>iter_events()</code>, <code>wait()</code>, and <code>result()</code>.</li>
+        </ul>
+      </section>
+
+      <section class="section" id="thread-session">
+        <h2>CodexThreadSession</h2>
+        <ul>
+          <li><code>continue_prompt(..., timeout_seconds=None)</code></li>
+          <li><code>continue_prompt_async(..., timeout_seconds=None)</code></li>
+          <li><code>continue_live(...)</code></li>
+          <li><code>continue_live_async(...)</code></li>
+          <li><code>is_last_turn_complete</code> helper property</li>
+        </ul>
+      </section>
+
+      <section class="section" id="errors">
+        <h2>Errors</h2>
+        <ul>
+          <li><code>CodexError</code> (base)</li>
+          <li><code>CodexNotInstalledError</code> (missing CLI)</li>
+          <li><code>CodexExecFailedError</code> (non-zero with <code>raise_on_error=True</code>)</li>
+        </ul>
+      </section>
+
+      <footer class="footer">Reference reflects current implementation in <code>codex_local_sdk/</code>.</footer>
+    </main>
+  </div>
+</body>
+</html>
