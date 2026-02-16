@@ -571,6 +571,8 @@ class CodexThreadSession:
         self,
         prompt: str,
         json_output: bool = True,
+        reasoning_effort: str | None = None,
+        extra_args: tuple[str, ...] = (),
         cwd: str | None = None,
         api_key: str | None = None,
         all_sessions: bool = False,
@@ -587,6 +589,8 @@ class CodexThreadSession:
             last=False,
             all_sessions=all_sessions,
             json_output=json_output,
+            reasoning_effort=reasoning_effort,
+            extra_args=extra_args,
             cwd=cwd or self.default_cwd,
             api_key=api_key or self.api_key,
             timeout_seconds=timeout_seconds,
@@ -599,6 +603,8 @@ class CodexThreadSession:
         self,
         prompt: str,
         json_output: bool = True,
+        reasoning_effort: str | None = None,
+        extra_args: tuple[str, ...] = (),
         cwd: str | None = None,
         api_key: str | None = None,
         all_sessions: bool = False,
@@ -612,6 +618,8 @@ class CodexThreadSession:
             last=False,
             all_sessions=all_sessions,
             json_output=json_output,
+            reasoning_effort=reasoning_effort,
+            extra_args=extra_args,
             cwd=cwd or self.default_cwd,
             api_key=api_key or self.api_key,
             timeout_seconds=timeout_seconds,
@@ -623,6 +631,8 @@ class CodexThreadSession:
     def continue_live(
         self,
         prompt: str,
+        reasoning_effort: str | None = None,
+        extra_args: tuple[str, ...] = (),
         cwd: str | None = None,
         api_key: str | None = None,
         all_sessions: bool = False,
@@ -637,6 +647,8 @@ class CodexThreadSession:
             session_name=self.session_name,
             last=False,
             all_sessions=all_sessions,
+            reasoning_effort=reasoning_effort,
+            extra_args=extra_args,
             cwd=cwd or self.default_cwd,
             api_key=api_key or self.api_key,
             _operation="continue_live",
@@ -645,6 +657,8 @@ class CodexThreadSession:
     async def continue_live_async(
         self,
         prompt: str,
+        reasoning_effort: str | None = None,
+        extra_args: tuple[str, ...] = (),
         cwd: str | None = None,
         api_key: str | None = None,
         all_sessions: bool = False,
@@ -656,6 +670,8 @@ class CodexThreadSession:
             session_name=self.session_name,
             last=False,
             all_sessions=all_sessions,
+            reasoning_effort=reasoning_effort,
+            extra_args=extra_args,
             cwd=cwd or self.default_cwd,
             api_key=api_key or self.api_key,
             _operation="continue_live_async",
@@ -994,6 +1010,8 @@ class CodexLocalClient:
         last: bool = True,
         all_sessions: bool = False,
         json_output: bool = False,
+        reasoning_effort: str | None = None,
+        extra_args: tuple[str, ...] = (),
         cwd: str | None = None,
         api_key: str | None = None,
         timeout_seconds: float | None = None,
@@ -1002,6 +1020,8 @@ class CodexLocalClient:
         """Resume an existing thread by explicit id or stored session name.
 
         Pass exactly one of `session_id` or `session_name`.
+        Use `reasoning_effort` to pass `--reasoning-effort`.
+        Use `extra_args` for additional raw CLI flags.
         """
         resolved_session_id = self._resolve_session_id(session_id=session_id, session_name=session_name)
 
@@ -1011,6 +1031,8 @@ class CodexLocalClient:
             last=last,
             all_sessions=all_sessions,
             json_output=json_output,
+            reasoning_effort=reasoning_effort,
+            extra_args=extra_args,
         )
 
         result = self._run_raw_command(
@@ -1044,6 +1066,8 @@ class CodexLocalClient:
         last: bool = True,
         all_sessions: bool = False,
         json_output: bool = False,
+        reasoning_effort: str | None = None,
+        extra_args: tuple[str, ...] = (),
         cwd: str | None = None,
         api_key: str | None = None,
         timeout_seconds: float | None = None,
@@ -1058,6 +1082,8 @@ class CodexLocalClient:
             last=last,
             all_sessions=all_sessions,
             json_output=json_output,
+            reasoning_effort=reasoning_effort,
+            extra_args=extra_args,
             cwd=cwd,
             api_key=api_key,
             timeout_seconds=timeout_seconds,
@@ -1072,6 +1098,8 @@ class CodexLocalClient:
         session_name: str | None = None,
         last: bool = True,
         all_sessions: bool = False,
+        reasoning_effort: str | None = None,
+        extra_args: tuple[str, ...] = (),
         cwd: str | None = None,
         api_key: str | None = None,
         _operation: str = "resume_live",
@@ -1079,6 +1107,7 @@ class CodexLocalClient:
         """Resume a thread in live event-streaming mode.
 
         JSON output is always enabled in live mode.
+        Use `reasoning_effort` and `extra_args` to pass additional CLI flags.
         """
         resolved_session_id = self._resolve_session_id(session_id=session_id, session_name=session_name)
 
@@ -1088,6 +1117,8 @@ class CodexLocalClient:
             last=last,
             all_sessions=all_sessions,
             json_output=True,
+            reasoning_effort=reasoning_effort,
+            extra_args=extra_args,
         )
 
         if not self.is_available():
@@ -1142,6 +1173,8 @@ class CodexLocalClient:
         session_name: str | None = None,
         last: bool = True,
         all_sessions: bool = False,
+        reasoning_effort: str | None = None,
+        extra_args: tuple[str, ...] = (),
         cwd: str | None = None,
         api_key: str | None = None,
         _operation: str = "resume_live_async",
@@ -1155,6 +1188,8 @@ class CodexLocalClient:
             last=last,
             all_sessions=all_sessions,
             json_output=True,
+            reasoning_effort=reasoning_effort,
+            extra_args=extra_args,
         )
 
         if not self.is_available():
@@ -1909,8 +1944,10 @@ class CodexLocalClient:
         last: bool,
         all_sessions: bool,
         json_output: bool,
+        reasoning_effort: str | None,
+        extra_args: tuple[str, ...],
     ) -> list[str]:
-        """Build a `codex exec resume` CLI command."""
+        """Build a `codex exec resume` CLI command with optional passthrough flags."""
         cmd = [self.codex_bin, "exec", "resume"]
 
         if session_id:
@@ -1924,6 +1961,10 @@ class CodexLocalClient:
         if json_output:
             cmd.append("--json")
 
+        if reasoning_effort:
+            cmd.extend(["--reasoning-effort", reasoning_effort])
+
+        cmd.extend(extra_args)
         cmd.append(prompt)
         return cmd
 
@@ -1935,6 +1976,8 @@ class CodexLocalClient:
             cmd.append("--json")
         if request.model:
             cmd.extend(["--model", request.model])
+        if request.reasoning_effort:
+            cmd.extend(["--reasoning-effort", request.reasoning_effort])
         if request.profile:
             cmd.extend(["--profile", request.profile])
         if request.sandbox:

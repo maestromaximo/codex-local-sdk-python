@@ -73,6 +73,7 @@ client = CodexLocalClient()
 result = client.run(
     CodexExecRequest(
         prompt="Summarize this repository and suggest three next steps.",
+        reasoning_effort="medium",
         sandbox=SandboxMode.READ_ONLY,
     ),
     timeout_seconds=120,
@@ -135,6 +136,8 @@ follow_up = client.resume(
     session_name="repo-plan",
     last=False,
     json_output=True,
+    reasoning_effort="medium",
+    extra_args=("--config", "codex.toml"),
 )
 print(follow_up.turn_status)</code></pre>
       </section>

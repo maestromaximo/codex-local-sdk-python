@@ -184,6 +184,26 @@ class TestCodexLocalClientSyncExtended(unittest.TestCase):
 
     @patch("codex_local_sdk.client.shutil.which", return_value="/usr/bin/codex")
     @patch("codex_local_sdk.client.subprocess.run")
+    def test_resume_supports_reasoning_effort_and_extra_args(self, mock_run, _mock_which):
+        mock_run.return_value = SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+        client = CodexLocalClient()
+        client.resume(
+            prompt="continue",
+            session_id="thread-888",
+            last=False,
+            reasoning_effort="medium",
+            extra_args=("--config", "codex.toml"),
+        )
+
+        cmd = mock_run.call_args.args[0]
+        self.assertIn("--reasoning-effort", cmd)
+        self.assertIn("medium", cmd)
+        self.assertIn("--config", cmd)
+        self.assertIn("codex.toml", cmd)
+
+    @patch("codex_local_sdk.client.shutil.which", return_value="/usr/bin/codex")
+    @patch("codex_local_sdk.client.subprocess.run")
     def test_start_thread_raises_when_thread_id_missing(self, mock_run, _mock_which):
         mock_run.return_value = SimpleNamespace(
             returncode=0,

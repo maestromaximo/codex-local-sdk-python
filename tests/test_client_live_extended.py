@@ -129,13 +129,24 @@ class TestLiveEntryPointsExtended(unittest.TestCase):
         mock_popen.return_value = _FakeProcess(stdout_text="", returncode=0, complete=True)
 
         client = CodexLocalClient()
-        live = client.resume_live(prompt="cont", session_id="thread-9", last=False, all_sessions=True)
+        live = client.resume_live(
+            prompt="cont",
+            session_id="thread-9",
+            last=False,
+            all_sessions=True,
+            reasoning_effort="low",
+            extra_args=("--config", "codex.toml"),
+        )
 
         cmd = live.command
         self.assertEqual(cmd[0:3], ("codex", "exec", "resume"))
         self.assertIn("thread-9", cmd)
         self.assertIn("--all", cmd)
         self.assertIn("--json", cmd)
+        self.assertIn("--reasoning-effort", cmd)
+        self.assertIn("low", cmd)
+        self.assertIn("--config", cmd)
+        self.assertIn("codex.toml", cmd)
 
 
 if __name__ == "__main__":

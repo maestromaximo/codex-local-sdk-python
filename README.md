@@ -80,11 +80,40 @@ client = CodexLocalClient()
 result = client.run(
     CodexExecRequest(
         prompt="Summarize this repo in 5 bullets.",
+        model="gpt-5.3-codex",
+        reasoning_effort="medium",
         sandbox=SandboxMode.READ_ONLY,
     ),
     timeout_seconds=120,
 )
 print(result.final_message)
+```
+
+## Runtime tuning (model, reasoning effort, resume passthrough)
+
+```python
+from codex_local_sdk import CodexLocalClient
+
+client = CodexLocalClient()
+
+# Convenience wrapper forwards to CodexExecRequest fields.
+client.run_prompt(
+    "Draft a migration plan.",
+    model="gpt-5.3-codex",
+    reasoning_effort="high",
+)
+
+session, _ = client.start_thread("Start a new task thread", json_output=True)
+
+# Resume APIs expose reasoning and extra CLI passthrough args too.
+follow_up = client.resume(
+    prompt="Continue with implementation checklist.",
+    session_id=session.session_id,
+    last=False,
+    json_output=True,
+    reasoning_effort="medium",
+    extra_args=("--config", "codex.toml"),
+)
 ```
 
 ## Async API

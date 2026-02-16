@@ -37,6 +37,7 @@ class TestCodexLocalClient(unittest.TestCase):
         req = CodexExecRequest(
             prompt="hello",
             model="gpt-5.3-codex",
+            reasoning_effort="high",
             sandbox=SandboxMode.READ_ONLY,
             full_auto=True,
             json_output=True,
@@ -52,6 +53,8 @@ class TestCodexLocalClient(unittest.TestCase):
         self.assertIn("--json", called_cmd)
         self.assertIn("--model", called_cmd)
         self.assertIn("gpt-5.3-codex", called_cmd)
+        self.assertIn("--reasoning-effort", called_cmd)
+        self.assertIn("high", called_cmd)
         self.assertIn("--sandbox", called_cmd)
         self.assertIn("read-only", called_cmd)
         self.assertIn("--full-auto", called_cmd)

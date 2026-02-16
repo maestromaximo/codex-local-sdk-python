@@ -114,7 +114,11 @@ session, first = client.start_thread(
 print(session.session_id)
 print(first.is_turn_completed)
 
-second = session.continue_prompt("Implement phase 1 tasks", json_output=True)
+second = session.continue_prompt(
+    "Implement phase 1 tasks",
+    json_output=True,
+    reasoning_effort="medium",
+)
 print(second.final_message)</code></pre>
       </section>
 
@@ -127,6 +131,7 @@ print(second.final_message)</code></pre>
     session_id="thread-abc123",
     json_output=True,
     last=False,
+    reasoning_effort="low",
 )
 print(result.turn_status)</code></pre>
 
@@ -136,6 +141,7 @@ print(result.turn_status)</code></pre>
     session_name="repo-plan",
     last=False,
     json_output=True,
+    extra_args=("--config", "codex.toml"),
 )</code></pre>
 
         <h3>Async Resume Live</h3>

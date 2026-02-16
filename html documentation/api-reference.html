@@ -75,7 +75,11 @@
         <h2>Core Models</h2>
 
         <h3>CodexExecRequest</h3>
-        <p>Describes <code>codex exec</code> CLI options (prompt, sandbox, model/profile, schema/output flags, images, extra args).</p>
+        <p>Describes <code>codex exec</code> CLI options (prompt, sandbox, model/reasoning effort/profile, schema/output flags, images, extra args).</p>
+        <ul>
+          <li><code>reasoning_effort</code> maps to CLI <code>--reasoning-effort</code>.</li>
+          <li><code>extra_args</code> appends raw CLI flags after SDK-managed options.</li>
+        </ul>
 
         <h3>RetryPolicy</h3>
         <div class="table-wrap">
@@ -147,13 +151,13 @@
             <tbody>
               <tr><td><code>run(..., timeout_seconds=None)</code></td><td>CodexExecResult</td><td>Sync run with retry policy.</td></tr>
               <tr><td><code>run_async(..., timeout_seconds=None)</code></td><td>awaitable[CodexExecResult]</td><td>Async wrapper around sync behavior.</td></tr>
-              <tr><td><code>run_prompt(..., api_key=None, timeout_seconds=None)</code></td><td>CodexExecResult</td><td>Prompt convenience wrapper.</td></tr>
+              <tr><td><code>run_prompt(..., api_key=None, timeout_seconds=None)</code></td><td>CodexExecResult</td><td>Prompt convenience wrapper (kwargs map to <code>CodexExecRequest</code> fields).</td></tr>
               <tr><td><code>run_prompt_async(...)</code></td><td>awaitable[CodexExecResult]</td><td>Async prompt wrapper.</td></tr>
               <tr><td><code>run_with_schema(..., api_key=None, timeout_seconds=None)</code></td><td>CodexExecResult</td><td>Schema-constrained output.</td></tr>
               <tr><td><code>run_with_schema_async(...)</code></td><td>awaitable[CodexExecResult]</td><td>Async schema wrapper.</td></tr>
               <tr><td><code>start_thread(..., session_name=None, timeout_seconds=None)</code></td><td>tuple[CodexThreadSession, CodexExecResult]</td><td>Starts JSON thread and optionally records named session metadata.</td></tr>
               <tr><td><code>start_thread_async(...)</code></td><td>awaitable[tuple[CodexThreadSession, CodexExecResult]]</td><td>Async thread start.</td></tr>
-              <tr><td><code>resume(..., session_name=None, timeout_seconds=None)</code></td><td>CodexExecResult</td><td>Sync continuation.</td></tr>
+              <tr><td><code>resume(..., session_name=None, reasoning_effort=None, extra_args=(), timeout_seconds=None)</code></td><td>CodexExecResult</td><td>Sync continuation with optional effort + passthrough flags.</td></tr>
               <tr><td><code>resume_async(...)</code></td><td>awaitable[CodexExecResult]</td><td>Async continuation.</td></tr>
               <tr><td><code>run_live(...)</code> / <code>resume_live(...)</code></td><td>CodexLiveRun</td><td>Sync live streaming with startup retry support.</td></tr>
               <tr><td><code>run_live_async(...)</code> / <code>resume_live_async(...)</code></td><td>awaitable[AsyncCodexLiveRun]</td><td>Async live streaming with startup retry support.</td></tr>

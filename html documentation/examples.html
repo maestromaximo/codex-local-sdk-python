@@ -152,12 +152,18 @@ second = client.resume(
     session_name="migration-plan",
     last=False,
     json_output=True,
+    reasoning_effort="medium",
+    extra_args=("--config", "codex.toml"),
     timeout_seconds=120,
 )
 print(second.final_message)
 
 same_session = client.open_session("migration-plan")
-third = same_session.continue_prompt("Continue with test strategy", json_output=True)
+third = same_session.continue_prompt(
+    "Continue with test strategy",
+    json_output=True,
+    reasoning_effort="low",
+)
 print(third.turn_status)</code></pre>
       </section>
 

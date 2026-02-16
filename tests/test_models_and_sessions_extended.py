@@ -53,11 +53,47 @@ class TestModelsAndSessionsExtended(unittest.TestCase):
         fake_client = _FakeClient()
         session = CodexThreadSession(client=fake_client, session_id="thread-b", default_cwd="/tmp")
 
-        out = session.continue_live("continue this")
+        out = session.continue_live(
+            "continue this",
+            reasoning_effort="high",
+            extra_args=("--config", "codex.toml"),
+        )
 
         self.assertEqual(out, "live-run")
         self.assertEqual(fake_client.kwargs["session_id"], "thread-b")
         self.assertEqual(fake_client.kwargs["cwd"], "/tmp")
+        self.assertEqual(fake_client.kwargs["reasoning_effort"], "high")
+        self.assertEqual(fake_client.kwargs["extra_args"], ("--config", "codex.toml"))
+
+    def test_thread_session_continue_prompt_forwards_reasoning_and_extra_args(self):
+        result = CodexExecResult(
+            return_code=0,
+            command=("codex", "exec", "resume"),
+            stdout="",
+            stderr="",
+            final_message="ok",
+            turn_status="completed",
+        )
+
+        class _FakeClient:
+            def __init__(self):
+                self.kwargs = None
+
+            def resume(self, **kwargs):
+                self.kwargs = kwargs
+                return result
+
+        fake_client = _FakeClient()
+        session = CodexThreadSession(client=fake_client, session_id="thread-z")
+        out = session.continue_prompt(
+            "continue this",
+            reasoning_effort="medium",
+            extra_args=("--config", "codex.toml"),
+        )
+
+        self.assertEqual(out, result)
+        self.assertEqual(fake_client.kwargs["reasoning_effort"], "medium")
+        self.assertEqual(fake_client.kwargs["extra_args"], ("--config", "codex.toml"))
 
     @patch("codex_local_sdk.client.shutil.which", return_value="/usr/bin/codex")
     @patch("codex_local_sdk.client.subprocess.run")
@@ -80,6 +116,7 @@ class TestModelsAndSessionsExtended(unittest.TestCase):
 
     def test_request_model_defaults(self):
         req = CodexExecRequest(prompt="x")
+        self.assertIsNone(req.reasoning_effort)
         self.assertEqual(req.images, ())
         self.assertEqual(req.extra_args, ())
 

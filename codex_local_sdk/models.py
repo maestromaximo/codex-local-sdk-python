@@ -24,7 +24,8 @@ class CodexExecRequest:
     Most users can start with `prompt` plus one or two optional flags:
     - `json_output=True` when you want parsed events and thread metadata.
     - `cwd` to run Codex in a specific project directory.
-    - `model`, `profile`, `sandbox` for CLI runtime configuration.
+    - `model`, `reasoning_effort`, `profile`, `sandbox` for CLI runtime
+      configuration.
 
     Example:
         request = CodexExecRequest(
@@ -38,6 +39,7 @@ class CodexExecRequest:
     cwd: str | None = None
     json_output: bool = False
     model: str | None = None
+    reasoning_effort: str | None = None
     profile: str | None = None
     sandbox: SandboxMode | None = None
     full_auto: bool = False
