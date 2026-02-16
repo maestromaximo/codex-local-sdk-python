@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Live Runs & Threads - SpawnCodex Python SDK Docs</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="assets/styles.css" rel="stylesheet">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <span class="logo">SpawnCodex</span>
+      <h1 class="title">Python SDK Docs</h1>
+      <p class="subtitle">Local Codex non-interactive client</p>
+
+      <div class="nav-group">
+        <p class="nav-group-label">Overview</p>
+        <a class="nav-link" href="index.html">Home</a>
+        <a class="nav-link" href="getting-started.html">Getting Started</a>
+        <a class="nav-link" href="api-reference.html">API Reference</a>
+        <a class="nav-link active" href="live-threads.html">Live Runs & Threads</a>
+        <a class="nav-link" href="examples.html">Examples Cookbook</a>
+        <a class="nav-link" href="testing-and-quality.html">Testing & Quality</a>
+      </div>
+
+      <div class="nav-group">
+        <p class="nav-group-label">On This Page</p>
+        <a class="nav-link" href="#live-overview">Live Overview</a>
+        <a class="nav-link" href="#popen-lifecycle">Popen Lifecycle</a>
+        <a class="nav-link" href="#async-lifecycle">Async Lifecycle</a>
+        <a class="nav-link" href="#thread-sessions">Thread Sessions</a>
+        <a class="nav-link" href="#resume-patterns">Resume Patterns</a>
+        <a class="nav-link" href="#completion-checks">Completion Checks</a>
+      </div>
+    </aside>
+
+    <main class="main">
+      <section class="hero" id="live-overview">
+        <span class="badge">Streaming</span>
+        <h1>Live Runs and Thread Continuation</h1>
+        <p>
+          Use sync or async live handles to stream events, and combine them with named sessions to build resumable multi-turn workflows.
+        </p>
+      </section>
+
+      <section class="section" id="popen-lifecycle">
+        <h2>Run Live with Popen (Sync)</h2>
+        <p>
+          <code>run_live()</code> forces JSON mode so events can be parsed immediately.
+          You can iterate events, monitor status, and collect the final result with <code>wait()</code>.
+        </p>
+<pre><code>from codex_local_sdk import CodexExecRequest, CodexLocalClient, SandboxMode
+
+client = CodexLocalClient()
+live = client.run_live(
+    CodexExecRequest(
+        prompt="Analyze architecture and propose migration plan.",
+        sandbox=SandboxMode.READ_ONLY,
+    )
+)
+
+for event in live.iter_events():
+    print(event.type)
+
+result = live.wait()
+print(result.turn_status)
+print(result.final_message)</code></pre>
+      </section>
+
+      <section class="section" id="async-lifecycle">
+        <h2>Run Live with asyncio (Async)</h2>
+        <p>
+          <code>run_live_async()</code> returns <code>AsyncCodexLiveRun</code> with async iteration and async wait/result methods.
+        </p>
+<pre><code>import asyncio
+from codex_local_sdk import CodexExecRequest, CodexLocalClient
+
+
+async def main() -> None:
+    client = CodexLocalClient()
+    live = await client.run_live_async(
+        CodexExecRequest(prompt="Stream architecture review", json_output=True)
+    )
+
+    async for event in live.iter_events():
+        print(event.type)
+
+    final = await live.wait()
+    print(final.turn_status, final.final_message)
+
+
+asyncio.run(main())</code></pre>
+      </section>
+
+      <section class="section" id="thread-sessions">
+        <h2>Thread Sessions for Multi-turn Flows</h2>
+        <p>
+          <code>start_thread()</code> captures thread ID and returns <code>CodexThreadSession</code>.
+          Add <code>session_name</code> to persist it via your configured session store.
+        </p>
+<pre><code>from codex_local_sdk import CodexLocalClient, JsonFileSessionStore, SandboxMode
+
+client = CodexLocalClient(session_store=JsonFileSessionStore(".codex_sessions.json"))
+session, first = client.start_thread(
+    prompt="Review repository and create a 3-phase plan.",
+    sandbox=SandboxMode.READ_ONLY,
+    session_name="repo-plan",
+)
+
+print(session.session_id)
+print(first.is_turn_completed)
+
+second = session.continue_prompt("Implement phase 1 tasks", json_output=True)
+print(second.final_message)</code></pre>
+      </section>
+
+      <section class="section" id="resume-patterns">
+        <h2>Resume Patterns</h2>
+
+        <h3>Resume by Session ID</h3>
+<pre><code>result = client.resume(
+    prompt="Continue and write test checklist.",
+    session_id="thread-abc123",
+    json_output=True,
+    last=False,
+)
+print(result.turn_status)</code></pre>
+
+        <h3>Resume by Session Name (Persistent Store)</h3>
+<pre><code>result = client.resume(
+    prompt="Continue and write implementation tasks.",
+    session_name="repo-plan",
+    last=False,
+    json_output=True,
+)</code></pre>
+
+        <h3>Async Resume Live</h3>
+<pre><code>live = await client.resume_live_async(
+    prompt="Continue and stream reasoning summary.",
+    session_name="repo-plan",
+    last=False,
+)
+async for event in live.iter_events():
+    print(event.type)
+result = await live.wait()</code></pre>
+      </section>
+
+      <section class="section" id="completion-checks">
+        <h2>Completion and Monitoring Checks</h2>
+        <p>Use turn status helpers and return codes to branch orchestration logic.</p>
+<pre><code>live = client.run_live(CodexExecRequest(prompt="Long analysis", json_output=True))
+
+for event in live.iter_events():
+    if event.type in {"turn.completed", "turn.failed", "turn.interrupted"}:
+        print("terminal event", event.type)
+
+result = live.wait()
+if result.is_turn_terminal and result.ok:
+    print("done", result.turn_status)
+else:
+    print("handle failure", result.return_code)</code></pre>
+
+        <h3>Retry Strategy for Follow-up Turns</h3>
+        <p>
+          Retry policy is configured on <code>CodexLocalClient</code> and applies to sync resume calls.
+          For async calls, choose explicit retry loops in your coroutine orchestration.
+        </p>
+      </section>
+
+      <footer class="footer">
+        Next: <a href="examples.html">Examples Cookbook</a> and <a href="testing-and-quality.html">Testing & Quality</a>.
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

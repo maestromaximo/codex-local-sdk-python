@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Examples Cookbook - SpawnCodex Python SDK Docs</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="assets/styles.css" rel="stylesheet">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <span class="logo">SpawnCodex</span>
+      <h1 class="title">Python SDK Docs</h1>
+      <p class="subtitle">Local Codex non-interactive client</p>
+
+      <div class="nav-group">
+        <p class="nav-group-label">Overview</p>
+        <a class="nav-link" href="index.html">Home</a>
+        <a class="nav-link" href="getting-started.html">Getting Started</a>
+        <a class="nav-link" href="api-reference.html">API Reference</a>
+        <a class="nav-link" href="live-threads.html">Live Runs & Threads</a>
+        <a class="nav-link active" href="examples.html">Examples Cookbook</a>
+        <a class="nav-link" href="testing-and-quality.html">Testing & Quality</a>
+      </div>
+
+      <div class="nav-group">
+        <p class="nav-group-label">On This Page</p>
+        <a class="nav-link" href="#official-examples">Repository Examples</a>
+        <a class="nav-link" href="#quick-recipes">Quick Recipes</a>
+        <a class="nav-link" href="#async-pattern">Async Pattern</a>
+        <a class="nav-link" href="#retry-pattern">Retry Pattern</a>
+        <a class="nav-link" href="#persistent-pattern">Persistent Session Pattern</a>
+      </div>
+    </aside>
+
+    <main class="main">
+      <section class="hero">
+        <span class="badge">Cookbook</span>
+        <h1>Examples and Integration Recipes</h1>
+        <p>
+          Ready-to-run snippets from <code>examples/</code> and integration patterns for sync/async, retries, and persistent sessions.
+        </p>
+      </section>
+
+      <section class="section" id="official-examples">
+        <h2>Examples in This Repository</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>File</th><th>Main Method</th><th>Purpose</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>examples/run_simple.py</code></td><td><code>client.run()</code></td><td>Basic prompt execution and final message output.</td></tr>
+              <tr><td><code>examples/run_json_events.py</code></td><td><code>json_output=True</code></td><td>Collect events, thread id, turn status, usage.</td></tr>
+              <tr><td><code>examples/run_live_stream.py</code></td><td><code>client.run_live()</code></td><td>Stream JSON events from a running sync process.</td></tr>
+              <tr><td><code>examples/run_thread_session.py</code></td><td><code>start_thread()</code></td><td>Create session and continue with follow-up prompts.</td></tr>
+              <tr><td><code>examples/run_with_schema.py</code></td><td><code>run_with_schema()</code></td><td>Constrain output to JSON schema and parse final JSON.</td></tr>
+              <tr><td><code>examples/run_async.py</code></td><td><code>run_async()</code> + <code>run_live_async()</code></td><td>Async run plus async event streaming.</td></tr>
+              <tr><td><code>examples/run_persistent_session_store.py</code></td><td><code>JsonFileSessionStore</code></td><td>Persist named sessions and resume by name.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section" id="quick-recipes">
+        <h2>Quick Recipes</h2>
+
+        <h3>1. Plain Prompt (Minimal)</h3>
+<pre><code>from codex_local_sdk import CodexLocalClient
+
+client = CodexLocalClient()
+result = client.run_prompt("Summarize this project in 5 bullets.")
+print(result.final_message)</code></pre>
+
+        <h3>2. Explicit Request with Sandbox</h3>
+<pre><code>from codex_local_sdk import CodexExecRequest, CodexLocalClient, SandboxMode
+
+client = CodexLocalClient()
+result = client.run(
+    CodexExecRequest(
+        prompt="Find architecture risks.",
+        sandbox=SandboxMode.READ_ONLY,
+        skip_git_repo_check=True,
+    )
+)</code></pre>
+      </section>
+
+      <section class="section" id="async-pattern">
+        <h2>Async Pattern</h2>
+<pre><code>import asyncio
+from codex_local_sdk import CodexExecRequest, CodexLocalClient
+
+
+async def main() -> None:
+    client = CodexLocalClient()
+
+    result = await client.run_async(CodexExecRequest(prompt="Analyze repo"))
+    print(result.final_message)
+
+    live = await client.run_live_async(CodexExecRequest(prompt="Stream repo analysis", json_output=True))
+    async for event in live.iter_events():
+        print(event.type)
+    final = await live.wait()
+    print(final.turn_status)
+
+
+asyncio.run(main())</code></pre>
+      </section>
+
+      <section class="section" id="retry-pattern">
+        <h2>Retry/Backoff Pattern</h2>
+<pre><code>from codex_local_sdk import CodexExecRequest, CodexLocalClient, RetryPolicy
+
+client = CodexLocalClient(
+    retry_policy=RetryPolicy(
+        max_attempts=3,
+        initial_backoff_seconds=0.5,
+        backoff_multiplier=2.0,
+        max_backoff_seconds=4.0,
+        retry_on_exit_codes=(7, 9),
+    )
+)
+
+result = client.run(CodexExecRequest(prompt="Run resiliently"))
+print(result.return_code, result.ok)</code></pre>
+      </section>
+
+      <section class="section" id="persistent-pattern">
+        <h2>Persistent Session Pattern</h2>
+<pre><code>from codex_local_sdk import CodexLocalClient, JsonFileSessionStore, SandboxMode
+
+client = CodexLocalClient(session_store=JsonFileSessionStore(".codex_sessions.json"))
+
+session, first = client.start_thread(
+    prompt="Create migration plan",
+    sandbox=SandboxMode.READ_ONLY,
+    session_name="migration-plan",
+)
+print(session.session_id, first.turn_status)
+
+second = client.resume(
+    prompt="Continue with phase 1 tasks",
+    session_name="migration-plan",
+    last=False,
+    json_output=True,
+)
+print(second.final_message)
+
+same_session = client.open_session("migration-plan")
+third = same_session.continue_prompt("Continue with test strategy", json_output=True)
+print(third.turn_status)</code></pre>
+      </section>
+
+      <section class="section">
+        <h2>Service Integration Skeleton</h2>
+<pre><code>class CodexService:
+    def __init__(self) -> None:
+        self.client = CodexLocalClient(default_cwd="/workspace/project")
+
+    def analyze_repo(self) -> str:
+        result = self.client.run_prompt(
+            "Provide architecture summary and top 5 technical risks.",
+            json_output=True,
+        )
+        return result.final_message or ""
+
+    async def analyze_repo_async(self) -> str:
+        result = await self.client.run_async(
+            CodexExecRequest(prompt="Provide async architecture summary", json_output=True)
+        )
+        return result.final_message or ""</code></pre>
+      </section>
+
+      <footer class="footer">
+        For method-level details, see <a href="api-reference.html">API Reference</a>.
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

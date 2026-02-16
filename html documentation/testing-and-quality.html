@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Testing & Quality - SpawnCodex Python SDK Docs</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="assets/styles.css" rel="stylesheet">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <span class="logo">SpawnCodex</span>
+      <h1 class="title">Python SDK Docs</h1>
+      <p class="subtitle">Local Codex non-interactive client</p>
+
+      <div class="nav-group">
+        <p class="nav-group-label">Overview</p>
+        <a class="nav-link" href="index.html">Home</a>
+        <a class="nav-link" href="getting-started.html">Getting Started</a>
+        <a class="nav-link" href="api-reference.html">API Reference</a>
+        <a class="nav-link" href="live-threads.html">Live Runs & Threads</a>
+        <a class="nav-link" href="examples.html">Examples Cookbook</a>
+        <a class="nav-link active" href="testing-and-quality.html">Testing & Quality</a>
+      </div>
+
+      <div class="nav-group">
+        <p class="nav-group-label">On This Page</p>
+        <a class="nav-link" href="#test-suite">Current Suite</a>
+        <a class="nav-link" href="#run-tests">Run Tests</a>
+        <a class="nav-link" href="#coverage-focus">Coverage Focus</a>
+        <a class="nav-link" href="#new-tests">Add New Tests</a>
+        <a class="nav-link" href="#ci-guidance">CI Guidance</a>
+      </div>
+    </aside>
+
+    <main class="main">
+      <section class="hero" id="test-suite">
+        <span class="badge">Quality</span>
+        <h1>Testing and Quality Guide</h1>
+        <p>
+          The suite uses <code>unittest</code> with mocks for subprocess calls and includes dedicated coverage for async,
+          retries/backoff, and session store persistence.
+        </p>
+      </section>
+
+      <section class="section" id="run-tests">
+        <h2>Run the Test Suite</h2>
+<pre><code>python3 -m unittest discover -s tests -p "test_*.py"</code></pre>
+        <p>Key suite files:</p>
+        <ul>
+          <li><code>tests/test_codex_local_sdk.py</code></li>
+          <li><code>tests/test_client_sync_extended.py</code></li>
+          <li><code>tests/test_client_live_extended.py</code></li>
+          <li><code>tests/test_models_and_sessions_extended.py</code></li>
+          <li><code>tests/test_async_retry_and_session_store.py</code></li>
+        </ul>
+      </section>
+
+      <section class="section" id="coverage-focus">
+        <h2>Current Coverage Focus</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Area</th><th>What is tested</th><th>Why it matters</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Command assembly</td><td>Flags like <code>--json</code>, <code>--model</code>, <code>--sandbox</code>, <code>--full-auto</code>, <code>--ephemeral</code>.</td><td>Prevents silent CLI misconfiguration.</td></tr>
+              <tr><td>JSON event extraction</td><td>Thread id, final message, turn status, usage parsing from JSONL stdout.</td><td>Ensures reliable orchestration metadata.</td></tr>
+              <tr><td>Live + async live</td><td><code>run_live()</code> and <code>run_live_async()</code> flows, event streaming, and final result parsing.</td><td>Guarantees stream semantics for sync and asyncio runtimes.</td></tr>
+              <tr><td>Retry/backoff policy</td><td>Retry-on-success, retry filter by exit code, exhaustion behavior.</td><td>Ensures resilient sync execution without hidden loops.</td></tr>
+              <tr><td>Session stores</td><td>In-memory and JSON-file persistence, start/resume by session name.</td><td>Validates resumability across process restarts.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section" id="new-tests">
+        <h2>Add New Tests</h2>
+        <h3>Pattern: Retry Policy</h3>
+<pre><code>@patch("codex_local_sdk.client.shutil.which", return_value="/usr/bin/codex")
+@patch("codex_local_sdk.client.time.sleep")
+@patch("codex_local_sdk.client.subprocess.run")
+def test_retry_until_success(mock_run, mock_sleep, _mock_which):
+    mock_run.side_effect = [
+        SimpleNamespace(returncode=7, stdout="", stderr="tmp"),
+        SimpleNamespace(returncode=0, stdout="ok", stderr=""),
+    ]
+    client = CodexLocalClient(retry_policy=RetryPolicy(max_attempts=3))
+    result = client.run(CodexExecRequest(prompt="x"))
+
+    assert result.ok
+    assert mock_run.call_count == 2
+    mock_sleep.assert_called_once()</code></pre>
+
+        <h3>Pattern: Async Live</h3>
+<pre><code>class TestAsyncApi(unittest.IsolatedAsyncioTestCase):
+    async def test_run_live_async(self):
+        # patch asyncio.create_subprocess_exec with fake process
+        live = await client.run_live_async(CodexExecRequest(prompt="x", json_output=True))
+        events = [event async for event in live.iter_events()]
+        result = await live.wait()
+
+        assert len(events) > 0
+        assert result.is_turn_terminal</code></pre>
+
+        <h3>Pattern: Session Store Persistence</h3>
+<pre><code>def test_json_file_store_roundtrip(tmp_path):
+    store = JsonFileSessionStore(str(tmp_path / "sessions.json"))
+    store.set("plan", "thread-1")
+    assert store.get("plan") == "thread-1"
+
+    store.delete("plan")
+    assert store.get("plan") is None</code></pre>
+      </section>
+
+      <section class="section" id="ci-guidance">
+        <h2>CI Guidance</h2>
+        <ul>
+          <li>Keep tests hermetic: mock CLI invocation and never require real Codex auth in unit tests.</li>
+          <li>Run full unit suite on every pull request.</li>
+          <li>Add integration smoke tests only in controlled environments with secure credentials.</li>
+          <li>Include both <code>raise_on_error=True</code> and <code>False</code> paths for new command code.</li>
+          <li>For async changes, add at least one <code>IsolatedAsyncioTestCase</code> scenario.</li>
+        </ul>
+      </section>
+
+      <section class="section">
+        <h2>Quality Checklist</h2>
+        <ul>
+          <li>New public methods documented in <code>api-reference.html</code>.</li>
+          <li>At least one runnable example added/updated in <code>examples/</code>.</li>
+          <li>Tests include success, failure, and edge-path assertions.</li>
+          <li>No secrets in examples, docs, fixtures, or committed session files.</li>
+        </ul>
+      </section>
+
+      <footer class="footer">
+        See <code>tests/test_async_retry_and_session_store.py</code> for async/retry/store baseline coverage.
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

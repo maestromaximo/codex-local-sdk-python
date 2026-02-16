@@ -28,6 +28,17 @@ class CodexExecRequest:
 
 
 @dataclass(frozen=True)
+class RetryPolicy:
+    """Retry/backoff configuration for sync command execution."""
+
+    max_attempts: int = 1
+    initial_backoff_seconds: float = 0.5
+    backoff_multiplier: float = 2.0
+    max_backoff_seconds: float = 8.0
+    retry_on_exit_codes: tuple[int, ...] | None = None
+
+
+@dataclass(frozen=True)
 class CodexEvent:
     type: str
     raw: dict

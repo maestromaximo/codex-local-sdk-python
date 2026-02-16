@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>API Reference - SpawnCodex Python SDK Docs</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="assets/styles.css" rel="stylesheet">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <span class="logo">SpawnCodex</span>
+      <h1 class="title">Python SDK Docs</h1>
+      <p class="subtitle">Local Codex non-interactive client</p>
+
+      <div class="nav-group">
+        <p class="nav-group-label">Overview</p>
+        <a class="nav-link" href="index.html">Home</a>
+        <a class="nav-link" href="getting-started.html">Getting Started</a>
+        <a class="nav-link active" href="api-reference.html">API Reference</a>
+        <a class="nav-link" href="live-threads.html">Live Runs & Threads</a>
+        <a class="nav-link" href="examples.html">Examples Cookbook</a>
+        <a class="nav-link" href="testing-and-quality.html">Testing & Quality</a>
+      </div>
+
+      <div class="nav-group">
+        <p class="nav-group-label">On This Page</p>
+        <a class="nav-link" href="#exports">Exports</a>
+        <a class="nav-link" href="#core-models">Core Models</a>
+        <a class="nav-link" href="#session-stores">Session Stores</a>
+        <a class="nav-link" href="#core-client">CodexLocalClient</a>
+        <a class="nav-link" href="#live-run">CodexLiveRun</a>
+        <a class="nav-link" href="#async-live-run">AsyncCodexLiveRun</a>
+        <a class="nav-link" href="#thread-session">CodexThreadSession</a>
+        <a class="nav-link" href="#errors">Errors</a>
+      </div>
+    </aside>
+
+    <main class="main">
+      <section class="hero">
+        <span class="badge">Reference</span>
+        <h1>Python SDK API Reference</h1>
+        <p>Canonical interface for sync + async Codex execution, retries/backoff, and persistent sessions.</p>
+      </section>
+
+      <section class="section" id="exports">
+        <h2>Package Exports</h2>
+        <pre><code>from codex_local_sdk import (
+    AsyncCodexLiveRun,
+    CodexLiveRun,
+    CodexLocalClient,
+    CodexThreadSession,
+    CodexError,
+    CodexExecFailedError,
+    CodexNotInstalledError,
+    CodexEvent,
+    CodexExecRequest,
+    CodexExecResult,
+    RetryPolicy,
+    SandboxMode,
+    SessionStore,
+    InMemorySessionStore,
+    JsonFileSessionStore,
+)</code></pre>
+      </section>
+
+      <section class="section" id="core-models">
+        <h2>Core Models</h2>
+
+        <h3>SandboxMode (Enum)</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Member</th><th>Value</th><th>Use Case</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>READ_ONLY</code></td><td><code>"read-only"</code></td><td>Analysis-only runs.</td></tr>
+              <tr><td><code>WORKSPACE_WRITE</code></td><td><code>"workspace-write"</code></td><td>Controlled code edits in workspace.</td></tr>
+              <tr><td><code>DANGER_FULL_ACCESS</code></td><td><code>"danger-full-access"</code></td><td>High-privilege isolated environments only.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>CodexExecRequest</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>prompt</code></td><td>str</td><td>Primary prompt for <code>codex exec</code>.</td></tr>
+              <tr><td><code>cwd</code></td><td>str | None</td><td>Working directory override.</td></tr>
+              <tr><td><code>json_output</code></td><td>bool</td><td>Adds <code>--json</code> for JSONL events.</td></tr>
+              <tr><td><code>model</code></td><td>str | None</td><td>Optional model override.</td></tr>
+              <tr><td><code>profile</code></td><td>str | None</td><td>Optional CLI profile name.</td></tr>
+              <tr><td><code>sandbox</code></td><td>SandboxMode | None</td><td>Sandbox mode setting.</td></tr>
+              <tr><td><code>full_auto</code></td><td>bool</td><td>Adds <code>--full-auto</code>.</td></tr>
+              <tr><td><code>ephemeral</code></td><td>bool</td><td>Adds <code>--ephemeral</code>.</td></tr>
+              <tr><td><code>skip_git_repo_check</code></td><td>bool</td><td>Adds <code>--skip-git-repo-check</code>.</td></tr>
+              <tr><td><code>output_last_message_path</code></td><td>str | None</td><td>Adds <code>--output-last-message</code>.</td></tr>
+              <tr><td><code>output_schema_path</code></td><td>str | None</td><td>Adds <code>--output-schema</code>.</td></tr>
+              <tr><td><code>images</code></td><td>tuple[str, ...]</td><td>Each path mapped to <code>--image</code>.</td></tr>
+              <tr><td><code>extra_args</code></td><td>tuple[str, ...]</td><td>Raw passthrough args appended before prompt.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>RetryPolicy</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>max_attempts</code></td><td>int</td><td>Maximum sync attempts. Minimum normalized to <code>1</code>.</td></tr>
+              <tr><td><code>initial_backoff_seconds</code></td><td>float</td><td>Delay before the first retry attempt.</td></tr>
+              <tr><td><code>backoff_multiplier</code></td><td>float</td><td>Multiplier for exponential backoff. Values &lt; 1 are normalized to <code>1</code>.</td></tr>
+              <tr><td><code>max_backoff_seconds</code></td><td>float</td><td>Upper cap for delay between retry attempts.</td></tr>
+              <tr><td><code>retry_on_exit_codes</code></td><td>tuple[int, ...] | None</td><td><code>None</code> retries all non-zero exit codes; tuple restricts retryable codes.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>CodexEvent</h3>
+        <pre><code>@dataclass(frozen=True)
+class CodexEvent:
+    type: str
+    raw: dict</code></pre>
+
+        <h3>CodexExecResult</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>return_code</code></td><td>int</td><td>Process exit code.</td></tr>
+              <tr><td><code>command</code></td><td>tuple[str, ...]</td><td>Executed command arguments.</td></tr>
+              <tr><td><code>stdout</code></td><td>str</td><td>Raw stdout.</td></tr>
+              <tr><td><code>stderr</code></td><td>str</td><td>Raw stderr.</td></tr>
+              <tr><td><code>final_message</code></td><td>str | None</td><td>Parsed final assistant message.</td></tr>
+              <tr><td><code>thread_id</code></td><td>str | None</td><td>Extracted session/thread id from events.</td></tr>
+              <tr><td><code>turn_status</code></td><td>str | None</td><td><code>completed</code>, <code>failed</code>, or <code>interrupted</code> when available.</td></tr>
+              <tr><td><code>usage</code></td><td>dict | None</td><td>Usage object from turn-complete events when present.</td></tr>
+              <tr><td><code>events</code></td><td>tuple[CodexEvent, ...]</td><td>Parsed JSONL events (JSON mode only).</td></tr>
+              <tr><td><code>duration_seconds</code></td><td>float</td><td>Total process runtime.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section" id="session-stores">
+        <h2>Session Stores</h2>
+        <p>Map a logical session name (for example, <code>"repo-plan"</code>) to a Codex thread/session ID.</p>
+
+        <h3>SessionStore (Abstract Interface)</h3>
+        <ul>
+          <li><code>get(name) -&gt; str | None</code></li>
+          <li><code>set(name, session_id) -&gt; None</code></li>
+          <li><code>delete(name) -&gt; None</code></li>
+          <li><code>all() -&gt; dict[str, str]</code></li>
+        </ul>
+
+        <h3>InMemorySessionStore</h3>
+        <p>Default store for short-lived process memory.</p>
+
+        <h3>JsonFileSessionStore</h3>
+        <p>Persistent local store backed by a JSON file, using atomic write/replace semantics.</p>
+      </section>
+
+      <section class="section" id="core-client">
+        <h2>CodexLocalClient</h2>
+
+        <h3>Constructor</h3>
+        <pre><code>CodexLocalClient(
+    codex_bin: str = "codex",
+    default_cwd: str | None = None,
+    default_env: dict[str, str] | None = None,
+    raise_on_error: bool = True,
+    retry_policy: RetryPolicy | None = None,
+    session_store: SessionStore | None = None,
+)</code></pre>
+
+        <h3>Sync + Async Methods</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Method</th><th>Returns</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>is_available()</code></td><td>bool</td><td>Checks <code>codex</code> binary on PATH.</td></tr>
+              <tr><td><code>run(request, api_key=None)</code></td><td>CodexExecResult</td><td>Primary sync execution method.</td></tr>
+              <tr><td><code>run_async(request, api_key=None)</code></td><td>awaitable[CodexExecResult]</td><td>Async wrapper for sync run.</td></tr>
+              <tr><td><code>run_prompt(prompt, **kwargs)</code></td><td>CodexExecResult</td><td>Prompt convenience wrapper.</td></tr>
+              <tr><td><code>run_prompt_async(prompt, **kwargs)</code></td><td>awaitable[CodexExecResult]</td><td>Async prompt wrapper.</td></tr>
+              <tr><td><code>run_with_schema(...)</code></td><td>CodexExecResult</td><td>Schema-constrained run with temp schema file.</td></tr>
+              <tr><td><code>run_with_schema_async(...)</code></td><td>awaitable[CodexExecResult]</td><td>Async schema-constrained run.</td></tr>
+              <tr><td><code>run_live(request, api_key=None)</code></td><td>CodexLiveRun</td><td>Live stream using <code>subprocess.Popen</code>.</td></tr>
+              <tr><td><code>run_live_async(request, api_key=None)</code></td><td>awaitable[AsyncCodexLiveRun]</td><td>Live stream using asyncio subprocess APIs.</td></tr>
+              <tr><td><code>start_thread(prompt, ...)</code></td><td>tuple[CodexThreadSession, CodexExecResult]</td><td>Starts JSON mode run and captures thread id.</td></tr>
+              <tr><td><code>start_thread_async(prompt, ...)</code></td><td>awaitable[tuple[CodexThreadSession, CodexExecResult]]</td><td>Async wrapper for thread start.</td></tr>
+              <tr><td><code>resume(prompt, ...)</code></td><td>CodexExecResult</td><td>Sync continuation via <code>codex exec resume</code>.</td></tr>
+              <tr><td><code>resume_async(prompt, ...)</code></td><td>awaitable[CodexExecResult]</td><td>Async wrapper for resume.</td></tr>
+              <tr><td><code>resume_live(prompt, ...)</code></td><td>CodexLiveRun</td><td>Live continuation stream (sync process handle).</td></tr>
+              <tr><td><code>resume_live_async(prompt, ...)</code></td><td>awaitable[AsyncCodexLiveRun]</td><td>Live continuation stream (async process handle).</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Session Store Helpers</h3>
+        <ul>
+          <li><code>save_session(name, session_id)</code></li>
+          <li><code>get_session_id(name)</code></li>
+          <li><code>delete_session(name)</code></li>
+          <li><code>list_sessions()</code></li>
+          <li><code>open_session(name, default_cwd=None, api_key=None)</code></li>
+        </ul>
+
+        <h3>Named Session Example</h3>
+        <pre><code>from codex_local_sdk import CodexLocalClient, JsonFileSessionStore
+
+client = CodexLocalClient(session_store=JsonFileSessionStore(".codex_sessions.json"))
+session, _ = client.start_thread("Analyze repo", session_name="repo-plan")
+
+next_result = client.resume(
+    prompt="Continue with implementation steps",
+    session_name="repo-plan",
+    last=False,
+    json_output=True,
+)</code></pre>
+      </section>
+
+      <section class="section" id="live-run">
+        <h2>CodexLiveRun</h2>
+        <p>Runtime controller for active sync live operations (<code>run_live</code> and <code>resume_live</code>).</p>
+        <ul>
+          <li><code>pid</code>, <code>events</code>, <code>is_complete</code>, <code>return_code</code></li>
+          <li><code>iter_events()</code>, <code>wait(timeout=None)</code>, <code>result()</code></li>
+          <li><code>terminate()</code>, <code>kill()</code></li>
+        </ul>
+      </section>
+
+      <section class="section" id="async-live-run">
+        <h2>AsyncCodexLiveRun</h2>
+        <p>Async live run controller returned by <code>run_live_async</code> and <code>resume_live_async</code>.</p>
+
+        <h3>Properties</h3>
+        <ul>
+          <li><code>pid</code>, <code>events</code>, <code>is_complete</code>, <code>return_code</code></li>
+        </ul>
+
+        <h3>Methods</h3>
+        <ul>
+          <li><code>async iter_events()</code></li>
+          <li><code>async wait(timeout=None)</code></li>
+          <li><code>async result()</code></li>
+          <li><code>terminate()</code>, <code>kill()</code></li>
+        </ul>
+
+        <h3>Example</h3>
+        <pre><code>live = await client.run_live_async(CodexExecRequest(prompt="Stream events", json_output=True))
+async for event in live.iter_events():
+    print(event.type)
+result = await live.wait()</code></pre>
+      </section>
+
+      <section class="section" id="thread-session">
+        <h2>CodexThreadSession</h2>
+        <p>High-level object for continuing a previously started execution thread/session.</p>
+
+        <h3>Fields and Helpers</h3>
+        <ul>
+          <li><code>session_id</code>: extracted thread identifier.</li>
+          <li><code>session_name</code>: optional logical name stored in <code>SessionStore</code>.</li>
+          <li><code>last_result</code>: most recent continuation result.</li>
+          <li><code>is_last_turn_complete</code>: completion helper.</li>
+        </ul>
+
+        <h3>Methods</h3>
+        <ul>
+          <li><code>continue_prompt(...)</code></li>
+          <li><code>continue_prompt_async(...)</code></li>
+          <li><code>continue_live(...)</code></li>
+          <li><code>continue_live_async(...)</code></li>
+        </ul>
+      </section>
+
+      <section class="section" id="errors">
+        <h2>Errors</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Error</th><th>When Raised</th><th>Notes</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>CodexError</code></td><td>Base SDK error</td><td>Use for broad exception handling.</td></tr>
+              <tr><td><code>CodexNotInstalledError</code></td><td>CLI binary missing</td><td>Raised by availability checks before execution.</td></tr>
+              <tr><td><code>CodexExecFailedError</code></td><td>Non-zero process exits with <code>raise_on_error=True</code></td><td>Includes <code>.result</code> with stdout/stderr/events.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <footer class="footer">
+        Reference is based on current local implementation in <code>codex_local_sdk/</code>.
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

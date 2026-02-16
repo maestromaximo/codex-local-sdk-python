@@ -1,0 +1,265 @@
+:root {
+  --bg: #0b0d10;
+  --bg-soft: #12161c;
+  --panel: #151a21;
+  --line: #2b3340;
+  --text: #e7ecf3;
+  --muted: #9aa6b8;
+  --accent: #10a37f;
+  --code-bg: #0f141b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: radial-gradient(circle at top right, #172130 0%, var(--bg) 40%);
+  color: var(--text);
+  font-family: "IBM Plex Sans", "Segoe UI", Roboto, Arial, sans-serif;
+  min-height: 100%;
+}
+
+a {
+  color: #7cc9ff;
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.sidebar {
+  border-right: 1px solid var(--line);
+  background: rgba(7, 10, 14, 0.92);
+  padding: 24px 18px;
+  position: sticky;
+  top: 0;
+  max-height: 100vh;
+  overflow-y: auto;
+}
+
+.logo {
+  display: block;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 16px;
+}
+
+.title {
+  font-size: 1.02rem;
+  font-weight: 700;
+  margin: 0 0 4px;
+}
+
+.subtitle {
+  font-size: 0.86rem;
+  color: var(--muted);
+  margin: 0 0 20px;
+}
+
+.nav-group {
+  margin-bottom: 16px;
+}
+
+.nav-group-label {
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+
+.nav-link {
+  display: block;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 0.9rem;
+  line-height: 1.25;
+}
+
+.nav-link.active {
+  background: linear-gradient(90deg, rgba(16, 163, 127, 0.22), rgba(16, 163, 127, 0.08));
+  border: 1px solid rgba(16, 163, 127, 0.34);
+}
+
+.main {
+  padding: 30px 38px 56px;
+}
+
+.hero {
+  background: linear-gradient(130deg, rgba(16, 163, 127, 0.16), rgba(26, 32, 43, 0.9));
+  border: 1px solid rgba(16, 163, 127, 0.28);
+  border-radius: 14px;
+  padding: 24px;
+  margin-bottom: 24px;
+}
+
+.hero h1 {
+  margin: 0 0 10px;
+  font-size: clamp(1.6rem, 2.4vw, 2.2rem);
+}
+
+.hero p {
+  margin: 0;
+  color: var(--muted);
+  max-width: 70ch;
+}
+
+.card-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  margin-bottom: 24px;
+}
+
+.card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  padding: 14px;
+}
+
+.card h3 {
+  margin: 0 0 6px;
+  font-size: 1rem;
+}
+
+.card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.section {
+  margin: 28px 0;
+}
+
+.section h2 {
+  margin: 0 0 10px;
+  font-size: 1.45rem;
+}
+
+.section h3 {
+  margin: 20px 0 10px;
+  font-size: 1.1rem;
+}
+
+.section p,
+.section li {
+  color: var(--text);
+  line-height: 1.6;
+}
+
+.section ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.badge {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 99px;
+  border: 1px solid rgba(16, 163, 127, 0.45);
+  color: #b7f1e3;
+  background: rgba(16, 163, 127, 0.12);
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+}
+
+pre {
+  margin: 10px 0 14px;
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px;
+  overflow: auto;
+}
+
+code,
+pre {
+  font-family: "IBM Plex Mono", "Cascadia Code", Consolas, monospace;
+  font-size: 0.85rem;
+}
+
+.table-wrap {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 720px;
+}
+
+thead {
+  background: #11161e;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 11px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+th {
+  color: #d8e2ef;
+  font-size: 0.83rem;
+  letter-spacing: 0.02em;
+}
+
+td {
+  font-size: 0.88rem;
+}
+
+.callout {
+  border-left: 4px solid var(--accent);
+  background: rgba(16, 163, 127, 0.1);
+  border-radius: 8px;
+  padding: 12px 12px 12px 14px;
+  margin: 14px 0;
+}
+
+.footer {
+  margin-top: 42px;
+  color: var(--muted);
+  font-size: 0.83rem;
+}
+
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: relative;
+    max-height: none;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .main {
+    padding: 22px 18px 34px;
+  }
+}
