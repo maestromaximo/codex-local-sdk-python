@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex Local SDK"
+  short_description: "Build and maintain Codex Local SDK workflows"
+  default_prompt: "Use $codex-local-sdk to implement SDK changes with tests and docs updates."
