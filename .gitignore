@@ -3,3 +3,6 @@
 /env
 __pycache__/
 *.pyc
+
+# Playground is for testing the codex local sdk.
+playground/
