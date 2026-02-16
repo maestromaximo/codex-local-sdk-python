@@ -1,0 +1,2 @@
+# This SDK currently uses only Python standard library modules.
+# Add project-specific dependencies below as needed.
