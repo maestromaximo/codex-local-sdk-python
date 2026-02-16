@@ -3,8 +3,15 @@
 [![PyPI Version](https://img.shields.io/pypi/v/codex-local-sdk-python.svg)](https://pypi.org/project/codex-local-sdk-python/)
 [![Python Versions](https://img.shields.io/pypi/pyversions/codex-local-sdk-python.svg)](https://pypi.org/project/codex-local-sdk-python/)
 [![Unit Tests](https://img.shields.io/github/actions/workflow/status/maestromaximo/codex-local-sdk-python/unit.yml?label=unit%20tests)](https://github.com/maestromaximo/codex-local-sdk-python/actions/workflows/unit.yml)
+[![License](https://img.shields.io/github/license/maestromaximo/codex-local-sdk-python)](LICENSE)
 
 This repository provides a Python SDK-style wrapper for Codex **non-interactive local execution** (`codex exec`).
+
+## Project Policies
+
+- Contributing guide: [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- Security policy: [`SECURITY.md`](SECURITY.md)
+- License: [`LICENSE`](LICENSE) (MIT)
 
 ## What this gives you
 

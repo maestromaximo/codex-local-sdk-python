@@ -4,10 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codex-local-sdk-python"
-version = "0.1.0"
+version = "0.1.1"
 description = "Python SDK wrapper around codex exec with bundled skill/docs scaffolding CLI."
 readme = "README.md"
 requires-python = ">=3.10"
+license = "MIT"
 authors = [
   { name = "Codex Local SDK Maintainers" }
 ]

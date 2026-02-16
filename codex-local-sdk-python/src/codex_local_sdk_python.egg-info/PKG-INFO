@@ -1,3 +1,17 @@
+Metadata-Version: 2.4
+Name: codex-local-sdk-python
+Version: 0.1.1
+Summary: Python SDK wrapper around codex exec with bundled skill/docs scaffolding CLI.
+Author: Codex Local SDK Maintainers
+License-Expression: MIT
+Project-URL: Homepage, https://github.com/maestromaximo/codex-local-sdk-python
+Project-URL: Repository, https://github.com/maestromaximo/codex-local-sdk-python
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3 :: Only
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+
 # codex-local-sdk-python
 
 [![PyPI Version](https://img.shields.io/pypi/v/codex-local-sdk-python.svg)](https://pypi.org/project/codex-local-sdk-python/)
