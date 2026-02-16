@@ -212,3 +212,27 @@ python3 -m unittest discover -s tests/integration -p "test_*.py"
 CI workflows:
 - `.github/workflows/unit.yml` runs on push/PR
 - `.github/workflows/integration.yml` is manual (`workflow_dispatch`) and secret-gated
+
+## Release Process
+
+This repository supports PyPI publishing via GitHub Actions trusted publishing (`.github/workflows/publish-pypi.yml`).
+
+1. Update version in:
+   - `codex-local-sdk-python/pyproject.toml`
+   - `codex-local-sdk-python/src/codex_sdk_python/__init__.py`
+2. Commit and push to `main`.
+3. Create and push a version tag:
+
+```bash
+git tag v0.1.2
+git push origin v0.1.2
+```
+
+4. GitHub Actions builds and publishes automatically to PyPI.
+
+If trusted publishing is not configured yet, set it in PyPI project settings:
+
+- Owner: `maestromaximo`
+- Repository: `codex-local-sdk-python`
+- Workflow: `publish-pypi.yml`
+- Environment: `pypi`
