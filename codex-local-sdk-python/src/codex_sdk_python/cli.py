@@ -58,7 +58,7 @@ def _copy_docs(target_root: Path, overwrite: bool) -> Path:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="codex-sdk",
-        description="Utilities for codex-sdk-python packaged assets.",
+        description="Utilities for codex-local-sdk-python packaged assets.",
     )
     subparsers = parser.add_subparsers(dest="command")
 

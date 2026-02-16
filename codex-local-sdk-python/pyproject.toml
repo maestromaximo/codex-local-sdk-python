@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "codex-sdk-python"
+name = "codex-local-sdk-python"
 version = "0.1.0"
 description = "Python SDK wrapper around codex exec with bundled skill/docs scaffolding CLI."
 readme = "README.md"
@@ -16,6 +16,10 @@ classifiers = [
   "Programming Language :: Python :: 3 :: Only",
   "Operating System :: OS Independent",
 ]
+
+[project.urls]
+Homepage = "https://github.com/maestromaximo/codex-local-sdk-python"
+Repository = "https://github.com/maestromaximo/codex-local-sdk-python"
 
 [project.scripts]
 codex-sdk = "codex_sdk_python.cli:main"

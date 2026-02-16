@@ -1,5 +1,9 @@
 # SpawnCodex Python Local SDK
 
+[![PyPI Version](https://img.shields.io/pypi/v/codex-local-sdk-python.svg)](https://pypi.org/project/codex-local-sdk-python/)
+[![Python Versions](https://img.shields.io/pypi/pyversions/codex-local-sdk-python.svg)](https://pypi.org/project/codex-local-sdk-python/)
+[![Unit Tests](https://img.shields.io/github/actions/workflow/status/maestromaximo/codex-local-sdk-python/unit.yml?label=unit%20tests)](https://github.com/maestromaximo/codex-local-sdk-python/actions/workflows/unit.yml)
+
 This repository provides a Python SDK-style wrapper for Codex **non-interactive local execution** (`codex exec`).
 
 ## What this gives you
@@ -14,6 +18,33 @@ This repository provides a Python SDK-style wrapper for Codex **non-interactive 
 - Unit tests plus real CLI integration test scaffolding
 
 Package: `codex_local_sdk`
+
+Published distribution: `codex-local-sdk-python`
+
+## Install from PyPI
+
+```bash
+pip install codex-local-sdk-python
+```
+
+The Python import package remains:
+
+```python
+from codex_local_sdk import CodexLocalClient
+```
+
+## Packaged CLI utilities
+
+After install, the package also includes:
+
+- `codex-sdk skill` to copy `.agents/skills/codex-local-sdk-usage`
+- `codex-sdk docs` to copy `codex-sdk-documentation/`
+
+```bash
+codex-sdk --help
+codex-sdk skill
+codex-sdk docs
+```
 
 ## Prerequisites
 
