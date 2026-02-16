@@ -1,19 +1,28 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import os
+import random
 import shutil
 import subprocess
 import tempfile
 import threading
 import time
 from dataclasses import replace
-from typing import AsyncIterator, Iterator
+from typing import AsyncIterator, Callable, Iterator
 
 from .exceptions import CodexError, CodexExecFailedError, CodexNotInstalledError
 from .models import CodexEvent, CodexExecRequest, CodexExecResult, RetryPolicy
-from .session_store import InMemorySessionStore, SessionStore
+from .session_store import InMemorySessionStore, SessionRecord, SessionStore, SessionTurnRecord
+from .telemetry import CodexClientEvent
+
+_TIMEOUT_MARKER = "SDK_TIMEOUT_EXPIRED"
+_PROMPT_PREVIEW_LIMIT = 180
+_MESSAGE_PREVIEW_LIMIT = 220
+_LIVE_STARTUP_PROBE_SECONDS = 0.2
+_LIVE_STARTUP_PROBE_INTERVAL_SECONDS = 0.01
 
 
 def _parse_event_line(line: str) -> CodexEvent | None:
@@ -139,6 +148,27 @@ def _build_result(
     )
 
 
+def _coerce_subprocess_output(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
+def _preview(text: str | None, limit: int) -> str | None:
+    if text is None:
+        return None
+    stripped = text.strip()
+    if not stripped:
+        return None
+    if len(stripped) <= limit:
+        return stripped
+    return f"{stripped[: limit - 3]}..."
+
+
 class CodexLiveRun:
     """Represents an active `codex exec --json` process started with Popen."""
 
@@ -148,11 +178,15 @@ class CodexLiveRun:
         command: list[str],
         started_at: float,
         raise_on_error: bool,
+        event_callback: Callable[[CodexEvent], None] | None = None,
+        result_callback: Callable[[CodexExecResult], None] | None = None,
     ) -> None:
         self._process = process
         self.command = tuple(command)
         self._started_at = started_at
         self._raise_on_error = raise_on_error
+        self._event_callback = event_callback
+        self._result_callback = result_callback
 
         self._stdout_lines: list[str] = []
         self._stderr_lines: list[str] = []
@@ -160,6 +194,7 @@ class CodexLiveRun:
 
         self._stdout_consumed = False
         self._result_cache: CodexExecResult | None = None
+        self._result_callback_sent = False
 
         self._stderr_thread = threading.Thread(target=self._drain_stderr, daemon=True)
         self._stderr_thread.start()
@@ -191,7 +226,7 @@ class CodexLiveRun:
 
         while True:
             line = self._process.stdout.readline()
-            if line == "" and self._process.poll() is not None:
+            if line == "":
                 break
             if not line:
                 continue
@@ -231,6 +266,13 @@ class CodexLiveRun:
             json_output=True,
         )
 
+        if not self._result_callback_sent and self._result_callback is not None:
+            try:
+                self._result_callback(result)
+            except Exception:
+                pass
+            self._result_callback_sent = True
+
         if self._raise_on_error and not result.ok:
             raise CodexExecFailedError(
                 f"Codex live command failed with exit code {result.return_code}.",
@@ -245,6 +287,11 @@ class CodexLiveRun:
         event = _parse_event_line(line.strip())
         if event is not None:
             self._events.append(event)
+            if self._event_callback is not None:
+                try:
+                    self._event_callback(event)
+                except Exception:
+                    pass
 
     def _consume_remaining_stdout(self) -> None:
         if self._stdout_consumed:
@@ -272,11 +319,15 @@ class AsyncCodexLiveRun:
         command: list[str],
         started_at: float,
         raise_on_error: bool,
+        event_callback: Callable[[CodexEvent], None] | None = None,
+        result_callback: Callable[[CodexExecResult], None] | None = None,
     ) -> None:
         self._process = process
         self.command = tuple(command)
         self._started_at = started_at
         self._raise_on_error = raise_on_error
+        self._event_callback = event_callback
+        self._result_callback = result_callback
 
         self._stdout_lines: list[str] = []
         self._stderr_lines: list[str] = []
@@ -284,6 +335,7 @@ class AsyncCodexLiveRun:
 
         self._stdout_consumed = False
         self._result_cache: CodexExecResult | None = None
+        self._result_callback_sent = False
 
         self._stderr_task = asyncio.create_task(self._drain_stderr())
 
@@ -358,6 +410,13 @@ class AsyncCodexLiveRun:
             json_output=True,
         )
 
+        if not self._result_callback_sent and self._result_callback is not None:
+            try:
+                self._result_callback(result)
+            except Exception:
+                pass
+            self._result_callback_sent = True
+
         if self._raise_on_error and not result.ok:
             raise CodexExecFailedError(
                 f"Codex async live command failed with exit code {result.return_code}.",
@@ -373,6 +432,11 @@ class AsyncCodexLiveRun:
         event = _parse_event_line(text.strip())
         if event is not None:
             self._events.append(event)
+            if self._event_callback is not None:
+                try:
+                    self._event_callback(event)
+                except Exception:
+                    pass
 
     async def _consume_remaining_stdout(self) -> None:
         if self._stdout_consumed:
@@ -423,15 +487,19 @@ class CodexThreadSession:
         cwd: str | None = None,
         api_key: str | None = None,
         all_sessions: bool = False,
+        timeout_seconds: float | None = None,
     ) -> CodexExecResult:
         result = self.client.resume(
             prompt=prompt,
-            session_id=self.session_id,
+            session_id=self.session_id if self.session_name is None else None,
+            session_name=self.session_name,
             last=False,
             all_sessions=all_sessions,
             json_output=json_output,
             cwd=cwd or self.default_cwd,
             api_key=api_key or self.api_key,
+            timeout_seconds=timeout_seconds,
+            _operation="continue_prompt",
         )
         self.last_result = result
         return result
@@ -443,15 +511,19 @@ class CodexThreadSession:
         cwd: str | None = None,
         api_key: str | None = None,
         all_sessions: bool = False,
+        timeout_seconds: float | None = None,
     ) -> CodexExecResult:
         result = await self.client.resume_async(
             prompt=prompt,
-            session_id=self.session_id,
+            session_id=self.session_id if self.session_name is None else None,
+            session_name=self.session_name,
             last=False,
             all_sessions=all_sessions,
             json_output=json_output,
             cwd=cwd or self.default_cwd,
             api_key=api_key or self.api_key,
+            timeout_seconds=timeout_seconds,
+            _operation="continue_prompt_async",
         )
         self.last_result = result
         return result
@@ -465,11 +537,13 @@ class CodexThreadSession:
     ) -> CodexLiveRun:
         return self.client.resume_live(
             prompt=prompt,
-            session_id=self.session_id,
+            session_id=self.session_id if self.session_name is None else None,
+            session_name=self.session_name,
             last=False,
             all_sessions=all_sessions,
             cwd=cwd or self.default_cwd,
             api_key=api_key or self.api_key,
+            _operation="continue_live",
         )
 
     async def continue_live_async(
@@ -481,11 +555,13 @@ class CodexThreadSession:
     ) -> AsyncCodexLiveRun:
         return await self.client.resume_live_async(
             prompt=prompt,
-            session_id=self.session_id,
+            session_id=self.session_id if self.session_name is None else None,
+            session_name=self.session_name,
             last=False,
             all_sessions=all_sessions,
             cwd=cwd or self.default_cwd,
             api_key=api_key or self.api_key,
+            _operation="continue_live_async",
         )
 
     @property
@@ -504,6 +580,7 @@ class CodexLocalClient:
         raise_on_error: bool = True,
         retry_policy: RetryPolicy | None = None,
         session_store: SessionStore | None = None,
+        event_hook: Callable[[CodexClientEvent], None] | None = None,
     ) -> None:
         self.codex_bin = codex_bin
         self.default_cwd = default_cwd
@@ -511,11 +588,17 @@ class CodexLocalClient:
         self.raise_on_error = raise_on_error
         self.retry_policy = self._normalize_retry_policy(retry_policy or RetryPolicy())
         self.session_store = session_store or InMemorySessionStore()
+        self.event_hook = event_hook
 
     def is_available(self) -> bool:
         return shutil.which(self.codex_bin) is not None
 
-    def run(self, request: CodexExecRequest, api_key: str | None = None) -> CodexExecResult:
+    def run(
+        self,
+        request: CodexExecRequest,
+        api_key: str | None = None,
+        timeout_seconds: float | None = None,
+    ) -> CodexExecResult:
         cmd = self._build_exec_command(request)
         return self._run_raw_command(
             cmd=cmd,
@@ -523,10 +606,17 @@ class CodexLocalClient:
             api_key=api_key,
             json_output=request.json_output,
             error_prefix="Codex command failed",
+            timeout_seconds=timeout_seconds,
+            operation="run",
         )
 
-    async def run_async(self, request: CodexExecRequest, api_key: str | None = None) -> CodexExecResult:
-        return await asyncio.to_thread(self.run, request, api_key)
+    async def run_async(
+        self,
+        request: CodexExecRequest,
+        api_key: str | None = None,
+        timeout_seconds: float | None = None,
+    ) -> CodexExecResult:
+        return await asyncio.to_thread(self.run, request, api_key, timeout_seconds)
 
     def run_live(self, request: CodexExecRequest, api_key: str | None = None) -> CodexLiveRun:
         """
@@ -545,16 +635,23 @@ class CodexLocalClient:
         cmd = self._build_exec_command(request)
         env = self._build_env(api_key=api_key)
         cwd = request.cwd or self.default_cwd
-        started = time.monotonic()
 
-        process = subprocess.Popen(
-            cmd,
+        process = self._start_sync_live_process(
+            cmd=cmd,
             cwd=cwd,
             env=env,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            bufsize=1,
+            operation="run_live",
+            session_name=None,
+            session_id=None,
+        )
+
+        started = time.monotonic()
+        self._emit_event(
+            event_type="live.started",
+            operation="run_live",
+            attempt=1,
+            command=tuple(cmd),
+            metadata={"pid": process.pid},
         )
 
         return CodexLiveRun(
@@ -562,6 +659,12 @@ class CodexLocalClient:
             command=cmd,
             started_at=started,
             raise_on_error=self.raise_on_error,
+            event_callback=self._make_live_event_callback(
+                operation="run_live",
+                command=tuple(cmd),
+                session_name=None,
+                session_id=None,
+            ),
         )
 
     async def run_live_async(self, request: CodexExecRequest, api_key: str | None = None) -> AsyncCodexLiveRun:
@@ -576,14 +679,23 @@ class CodexLocalClient:
         cmd = self._build_exec_command(request)
         env = self._build_env(api_key=api_key)
         cwd = request.cwd or self.default_cwd
-        started = time.monotonic()
 
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
+        process = await self._start_async_live_process(
+            cmd=cmd,
             cwd=cwd,
             env=env,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            operation="run_live_async",
+            session_name=None,
+            session_id=None,
+        )
+
+        started = time.monotonic()
+        self._emit_event(
+            event_type="live.started",
+            operation="run_live_async",
+            attempt=1,
+            command=tuple(cmd),
+            metadata={"pid": process.pid},
         )
 
         return AsyncCodexLiveRun(
@@ -591,21 +703,47 @@ class CodexLocalClient:
             command=cmd,
             started_at=started,
             raise_on_error=self.raise_on_error,
+            event_callback=self._make_live_event_callback(
+                operation="run_live_async",
+                command=tuple(cmd),
+                session_name=None,
+                session_id=None,
+            ),
         )
 
-    def run_prompt(self, prompt: str, **kwargs: object) -> CodexExecResult:
+    def run_prompt(
+        self,
+        prompt: str,
+        api_key: str | None = None,
+        timeout_seconds: float | None = None,
+        **kwargs: object,
+    ) -> CodexExecResult:
         request = CodexExecRequest(prompt=prompt)
         request = replace(request, **kwargs)
-        return self.run(request)
+        return self.run(request, api_key=api_key, timeout_seconds=timeout_seconds)
 
-    async def run_prompt_async(self, prompt: str, **kwargs: object) -> CodexExecResult:
-        return await asyncio.to_thread(self.run_prompt, prompt, **kwargs)
+    async def run_prompt_async(
+        self,
+        prompt: str,
+        api_key: str | None = None,
+        timeout_seconds: float | None = None,
+        **kwargs: object,
+    ) -> CodexExecResult:
+        return await asyncio.to_thread(
+            self.run_prompt,
+            prompt,
+            api_key,
+            timeout_seconds,
+            **kwargs,
+        )
 
     def run_with_schema(
         self,
         prompt: str,
         schema: dict,
         output_json_path: str | None = None,
+        api_key: str | None = None,
+        timeout_seconds: float | None = None,
         **kwargs: object,
     ) -> CodexExecResult:
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
@@ -620,7 +758,7 @@ class CodexLocalClient:
                 output_last_message_path=output_json_path,
                 **kwargs,
             )
-            return self.run(request)
+            return self.run(request, api_key=api_key, timeout_seconds=timeout_seconds)
         finally:
             try:
                 os.remove(schema_path)
@@ -632,15 +770,26 @@ class CodexLocalClient:
         prompt: str,
         schema: dict,
         output_json_path: str | None = None,
+        api_key: str | None = None,
+        timeout_seconds: float | None = None,
         **kwargs: object,
     ) -> CodexExecResult:
-        return await asyncio.to_thread(self.run_with_schema, prompt, schema, output_json_path, **kwargs)
+        return await asyncio.to_thread(
+            self.run_with_schema,
+            prompt,
+            schema,
+            output_json_path,
+            api_key,
+            timeout_seconds,
+            **kwargs,
+        )
 
     def start_thread(
         self,
         prompt: str,
         api_key: str | None = None,
         session_name: str | None = None,
+        timeout_seconds: float | None = None,
         **request_overrides: object,
     ) -> tuple[CodexThreadSession, CodexExecResult]:
         """
@@ -651,7 +800,7 @@ class CodexLocalClient:
         request = CodexExecRequest(prompt=prompt, json_output=True)
         request = replace(request, **{**request_overrides, "json_output": True})
 
-        result = self.run(request, api_key=api_key)
+        result = self.run(request, api_key=api_key, timeout_seconds=timeout_seconds)
         if result.thread_id is None:
             raise CodexError("Could not extract thread/session ID from Codex events.")
 
@@ -665,7 +814,13 @@ class CodexLocalClient:
         session.last_result = result
 
         if session_name:
-            self.save_session(session_name, result.thread_id)
+            self._update_session_record(
+                session_name=session_name,
+                session_id=result.thread_id,
+                prompt=prompt,
+                result=result,
+                operation="start_thread",
+            )
 
         return session, result
 
@@ -674,15 +829,18 @@ class CodexLocalClient:
         prompt: str,
         api_key: str | None = None,
         session_name: str | None = None,
+        timeout_seconds: float | None = None,
         **request_overrides: object,
     ) -> tuple[CodexThreadSession, CodexExecResult]:
-        return await asyncio.to_thread(
+        func = functools.partial(
             self.start_thread,
             prompt,
-            api_key,
-            session_name,
+            api_key=api_key,
+            session_name=session_name,
+            timeout_seconds=timeout_seconds,
             **request_overrides,
         )
+        return await asyncio.to_thread(func)
 
     def resume(
         self,
@@ -694,6 +852,8 @@ class CodexLocalClient:
         json_output: bool = False,
         cwd: str | None = None,
         api_key: str | None = None,
+        timeout_seconds: float | None = None,
+        _operation: str = "resume",
     ) -> CodexExecResult:
         resolved_session_id = self._resolve_session_id(session_id=session_id, session_name=session_name)
 
@@ -705,13 +865,28 @@ class CodexLocalClient:
             json_output=json_output,
         )
 
-        return self._run_raw_command(
+        result = self._run_raw_command(
             cmd=cmd,
             cwd=cwd,
             api_key=api_key,
             json_output=json_output,
             error_prefix="Codex resume failed",
+            timeout_seconds=timeout_seconds,
+            operation=_operation,
+            session_name=session_name,
+            session_id=resolved_session_id,
         )
+
+        if session_name and resolved_session_id:
+            self._update_session_record(
+                session_name=session_name,
+                session_id=resolved_session_id,
+                prompt=prompt,
+                result=result,
+                operation=_operation,
+            )
+
+        return result
 
     async def resume_async(
         self,
@@ -723,18 +898,23 @@ class CodexLocalClient:
         json_output: bool = False,
         cwd: str | None = None,
         api_key: str | None = None,
+        timeout_seconds: float | None = None,
+        _operation: str = "resume_async",
     ) -> CodexExecResult:
-        return await asyncio.to_thread(
+        func = functools.partial(
             self.resume,
             prompt,
-            session_id,
-            session_name,
-            last,
-            all_sessions,
-            json_output,
-            cwd,
-            api_key,
+            session_id=session_id,
+            session_name=session_name,
+            last=last,
+            all_sessions=all_sessions,
+            json_output=json_output,
+            cwd=cwd,
+            api_key=api_key,
+            timeout_seconds=timeout_seconds,
+            _operation=_operation,
         )
+        return await asyncio.to_thread(func)
 
     def resume_live(
         self,
@@ -745,6 +925,7 @@ class CodexLocalClient:
         all_sessions: bool = False,
         cwd: str | None = None,
         api_key: str | None = None,
+        _operation: str = "resume_live",
     ) -> CodexLiveRun:
         resolved_session_id = self._resolve_session_id(session_id=session_id, session_name=session_name)
 
@@ -762,15 +943,24 @@ class CodexLocalClient:
             )
 
         env = self._build_env(api_key=api_key)
-        started = time.monotonic()
-        process = subprocess.Popen(
-            cmd,
+        process = self._start_sync_live_process(
+            cmd=cmd,
             cwd=cwd or self.default_cwd,
             env=env,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            bufsize=1,
+            operation=_operation,
+            session_name=session_name,
+            session_id=resolved_session_id,
+        )
+
+        started = time.monotonic()
+        self._emit_event(
+            event_type="live.started",
+            operation=_operation,
+            attempt=1,
+            command=tuple(cmd),
+            session_name=session_name,
+            session_id=resolved_session_id,
+            metadata={"pid": process.pid},
         )
 
         return CodexLiveRun(
@@ -778,6 +968,18 @@ class CodexLocalClient:
             command=cmd,
             started_at=started,
             raise_on_error=self.raise_on_error,
+            event_callback=self._make_live_event_callback(
+                operation=_operation,
+                command=tuple(cmd),
+                session_name=session_name,
+                session_id=resolved_session_id,
+            ),
+            result_callback=self._make_session_result_callback(
+                operation=_operation,
+                session_name=session_name,
+                session_id=resolved_session_id,
+                prompt=prompt,
+            ),
         )
 
     async def resume_live_async(
@@ -789,6 +991,7 @@ class CodexLocalClient:
         all_sessions: bool = False,
         cwd: str | None = None,
         api_key: str | None = None,
+        _operation: str = "resume_live_async",
     ) -> AsyncCodexLiveRun:
         resolved_session_id = self._resolve_session_id(session_id=session_id, session_name=session_name)
 
@@ -806,13 +1009,24 @@ class CodexLocalClient:
             )
 
         env = self._build_env(api_key=api_key)
-        started = time.monotonic()
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
+        process = await self._start_async_live_process(
+            cmd=cmd,
             cwd=cwd or self.default_cwd,
             env=env,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            operation=_operation,
+            session_name=session_name,
+            session_id=resolved_session_id,
+        )
+
+        started = time.monotonic()
+        self._emit_event(
+            event_type="live.started",
+            operation=_operation,
+            attempt=1,
+            command=tuple(cmd),
+            session_name=session_name,
+            session_id=resolved_session_id,
+            metadata={"pid": process.pid},
         )
 
         return AsyncCodexLiveRun(
@@ -820,6 +1034,18 @@ class CodexLocalClient:
             command=cmd,
             started_at=started,
             raise_on_error=self.raise_on_error,
+            event_callback=self._make_live_event_callback(
+                operation=_operation,
+                command=tuple(cmd),
+                session_name=session_name,
+                session_id=resolved_session_id,
+            ),
+            result_callback=self._make_session_result_callback(
+                operation=_operation,
+                session_name=session_name,
+                session_id=resolved_session_id,
+                prompt=prompt,
+            ),
         )
 
     def save_session(self, name: str, session_id: str) -> None:
@@ -833,6 +1059,12 @@ class CodexLocalClient:
 
     def list_sessions(self) -> dict[str, str]:
         return self.session_store.all()
+
+    def get_session_record(self, name: str) -> SessionRecord | None:
+        return self.session_store.get_record(name)
+
+    def list_session_records(self) -> dict[str, SessionRecord]:
+        return self.session_store.list_records()
 
     def open_session(
         self,
@@ -859,6 +1091,10 @@ class CodexLocalClient:
         api_key: str | None,
         json_output: bool,
         error_prefix: str,
+        timeout_seconds: float | None,
+        operation: str,
+        session_name: str | None = None,
+        session_id: str | None = None,
     ) -> CodexExecResult:
         if not self.is_available():
             raise CodexNotInstalledError(
@@ -866,38 +1102,121 @@ class CodexLocalClient:
             )
 
         env = self._build_env(api_key=api_key)
-
         attempt = 1
-        backoff = self.retry_policy.initial_backoff_seconds
+        retry_started_at = time.monotonic()
 
         while True:
-            started = time.monotonic()
-            completed = subprocess.run(
-                cmd,
-                cwd=cwd or self.default_cwd,
-                env=env,
-                text=True,
-                capture_output=True,
-                check=False,
+            self._emit_event(
+                event_type="attempt.started",
+                operation=operation,
+                attempt=attempt,
+                command=tuple(cmd),
+                session_name=session_name,
+                session_id=session_id,
             )
-            duration = time.monotonic() - started
 
-            result = _build_result(
-                return_code=completed.returncode,
-                command=cmd,
-                stdout=completed.stdout,
-                stderr=completed.stderr,
-                duration_seconds=duration,
-                json_output=json_output,
-            )
+            started = time.monotonic()
+            try:
+                completed = subprocess.run(
+                    cmd,
+                    cwd=cwd or self.default_cwd,
+                    env=env,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    timeout=timeout_seconds,
+                )
+                duration = time.monotonic() - started
+
+                result = _build_result(
+                    return_code=completed.returncode,
+                    command=cmd,
+                    stdout=completed.stdout,
+                    stderr=completed.stderr,
+                    duration_seconds=duration,
+                    json_output=json_output,
+                )
+            except subprocess.TimeoutExpired as exc:
+                duration = time.monotonic() - started
+                result = self._build_timeout_result(
+                    cmd=cmd,
+                    duration_seconds=duration,
+                    json_output=json_output,
+                    timeout_seconds=timeout_seconds,
+                    exc=exc,
+                )
+            except (OSError, subprocess.SubprocessError) as exc:
+                self._emit_event(
+                    event_type="attempt.failed",
+                    operation=operation,
+                    attempt=attempt,
+                    command=tuple(cmd),
+                    session_name=session_name,
+                    session_id=session_id,
+                    message=str(exc),
+                )
+
+                if self._should_retry(attempt=attempt, exception=exc, retry_started_at=retry_started_at):
+                    retry_delay = self._compute_retry_delay(attempt=attempt, retry_started_at=retry_started_at)
+                    self._emit_event(
+                        event_type="retry.scheduled",
+                        operation=operation,
+                        attempt=attempt,
+                        command=tuple(cmd),
+                        session_name=session_name,
+                        session_id=session_id,
+                        retry_delay_seconds=retry_delay,
+                        message=str(exc),
+                    )
+                    if retry_delay > 0:
+                        self._sleep_backoff(retry_delay)
+                    attempt += 1
+                    continue
+
+                raise CodexError(f"{error_prefix}: {exc}") from exc
 
             if result.ok:
+                self._emit_event(
+                    event_type="attempt.succeeded",
+                    operation=operation,
+                    attempt=attempt,
+                    command=tuple(cmd),
+                    session_name=session_name,
+                    session_id=session_id,
+                    return_code=result.return_code,
+                    turn_status=result.turn_status,
+                    duration_seconds=result.duration_seconds,
+                )
                 return result
 
-            should_retry = self._should_retry_result(result=result, attempt=attempt)
-            if should_retry:
-                self._sleep_backoff(backoff)
-                backoff = self._next_backoff(backoff)
+            self._emit_event(
+                event_type="attempt.failed",
+                operation=operation,
+                attempt=attempt,
+                command=tuple(cmd),
+                session_name=session_name,
+                session_id=session_id,
+                return_code=result.return_code,
+                turn_status=result.turn_status,
+                duration_seconds=result.duration_seconds,
+                message=result.stderr.strip() or None,
+            )
+
+            if self._should_retry(attempt=attempt, result=result, retry_started_at=retry_started_at):
+                retry_delay = self._compute_retry_delay(attempt=attempt, retry_started_at=retry_started_at)
+                self._emit_event(
+                    event_type="retry.scheduled",
+                    operation=operation,
+                    attempt=attempt,
+                    command=tuple(cmd),
+                    session_name=session_name,
+                    session_id=session_id,
+                    retry_delay_seconds=retry_delay,
+                    return_code=result.return_code,
+                    turn_status=result.turn_status,
+                )
+                if retry_delay > 0:
+                    self._sleep_backoff(retry_delay)
                 attempt += 1
                 continue
 
@@ -909,11 +1228,55 @@ class CodexLocalClient:
 
             return result
 
-    def _should_retry_result(self, result: CodexExecResult, attempt: int) -> bool:
-        if result.ok:
+    def _build_timeout_result(
+        self,
+        cmd: list[str],
+        duration_seconds: float,
+        json_output: bool,
+        timeout_seconds: float | None,
+        exc: subprocess.TimeoutExpired,
+    ) -> CodexExecResult:
+        stdout = _coerce_subprocess_output(getattr(exc, "stdout", ""))
+        stderr = _coerce_subprocess_output(getattr(exc, "stderr", ""))
+        timeout_label = timeout_seconds if timeout_seconds is not None else "unknown"
+        timeout_message = f"{_TIMEOUT_MARKER}: command timed out after {timeout_label} seconds."
+        combined_stderr = timeout_message if not stderr else f"{timeout_message}\n{stderr}"
+
+        return _build_result(
+            return_code=124,
+            command=cmd,
+            stdout=stdout,
+            stderr=combined_stderr,
+            duration_seconds=duration_seconds,
+            json_output=json_output,
+        )
+
+    def _is_timeout_result(self, result: CodexExecResult) -> bool:
+        return _TIMEOUT_MARKER in result.stderr
+
+    def _should_retry(
+        self,
+        attempt: int,
+        result: CodexExecResult | None = None,
+        exception: BaseException | None = None,
+        retry_started_at: float | None = None,
+    ) -> bool:
+        if attempt >= self.retry_policy.max_attempts:
             return False
 
-        if attempt >= self.retry_policy.max_attempts:
+        max_total = self.retry_policy.max_total_retry_seconds
+        if max_total is not None and retry_started_at is not None:
+            elapsed = time.monotonic() - retry_started_at
+            if elapsed >= max_total:
+                return False
+
+        if exception is not None:
+            return self._is_retryable_exception(exception)
+
+        if result is None or result.ok:
+            return False
+
+        if self._is_timeout_result(result) and not self.retry_policy.retry_on_timeouts:
             return False
 
         exit_codes = self.retry_policy.retry_on_exit_codes
@@ -922,9 +1285,28 @@ class CodexLocalClient:
 
         return result.return_code in exit_codes
 
-    def _next_backoff(self, current: float) -> float:
-        next_backoff = current * self.retry_policy.backoff_multiplier
-        return min(next_backoff, self.retry_policy.max_backoff_seconds)
+    def _is_retryable_exception(self, exception: BaseException) -> bool:
+        return isinstance(exception, (OSError, subprocess.SubprocessError))
+
+    def _compute_retry_delay(self, attempt: int, retry_started_at: float | None = None) -> float:
+        exponent = max(0, attempt - 1)
+        base_delay = self.retry_policy.initial_backoff_seconds * (self.retry_policy.backoff_multiplier**exponent)
+        delay = min(base_delay, self.retry_policy.max_backoff_seconds)
+
+        if delay > 0 and self.retry_policy.jitter_ratio > 0:
+            jitter_span = delay * self.retry_policy.jitter_ratio
+            delay += random.uniform(-jitter_span, jitter_span)
+            if delay < 0:
+                delay = 0.0
+
+        max_total = self.retry_policy.max_total_retry_seconds
+        if max_total is not None and retry_started_at is not None:
+            remaining = max_total - (time.monotonic() - retry_started_at)
+            if remaining <= 0:
+                return 0.0
+            delay = min(delay, remaining)
+
+        return delay
 
     def _sleep_backoff(self, seconds: float) -> None:
         if seconds <= 0:
@@ -939,13 +1321,380 @@ class CodexLocalClient:
             backoff_multiplier = 1.0
         max_backoff_seconds = max(initial_backoff_seconds, retry_policy.max_backoff_seconds)
 
+        jitter_ratio = max(0.0, retry_policy.jitter_ratio)
+        max_total_retry_seconds = retry_policy.max_total_retry_seconds
+        if max_total_retry_seconds is not None and max_total_retry_seconds <= 0:
+            max_total_retry_seconds = None
+
         return RetryPolicy(
             max_attempts=max_attempts,
             initial_backoff_seconds=initial_backoff_seconds,
             backoff_multiplier=backoff_multiplier,
             max_backoff_seconds=max_backoff_seconds,
             retry_on_exit_codes=retry_policy.retry_on_exit_codes,
+            jitter_ratio=jitter_ratio,
+            max_total_retry_seconds=max_total_retry_seconds,
+            retry_on_timeouts=bool(retry_policy.retry_on_timeouts),
         )
+
+    def _start_sync_live_process(
+        self,
+        cmd: list[str],
+        cwd: str | None,
+        env: dict[str, str],
+        operation: str,
+        session_name: str | None,
+        session_id: str | None,
+    ) -> subprocess.Popen[str]:
+        attempt = 1
+        retry_started_at = time.monotonic()
+
+        while True:
+            try:
+                process = subprocess.Popen(
+                    cmd,
+                    cwd=cwd,
+                    env=env,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    bufsize=1,
+                )
+            except (OSError, subprocess.SubprocessError) as exc:
+                self._emit_event(
+                    event_type="live.startup_failed",
+                    operation=operation,
+                    attempt=attempt,
+                    command=tuple(cmd),
+                    session_name=session_name,
+                    session_id=session_id,
+                    message=str(exc),
+                )
+
+                if self._should_retry(attempt=attempt, exception=exc, retry_started_at=retry_started_at):
+                    retry_delay = self._compute_retry_delay(attempt=attempt, retry_started_at=retry_started_at)
+                    self._emit_event(
+                        event_type="live.startup_retried",
+                        operation=operation,
+                        attempt=attempt,
+                        command=tuple(cmd),
+                        session_name=session_name,
+                        session_id=session_id,
+                        retry_delay_seconds=retry_delay,
+                        message=str(exc),
+                    )
+                    self._sleep_backoff(retry_delay)
+                    attempt += 1
+                    continue
+
+                raise CodexError(f"{operation} startup failed: {exc}") from exc
+
+            startup_rc = self._probe_sync_process_exit(process, _LIVE_STARTUP_PROBE_SECONDS)
+            if startup_rc is not None:
+                probe_result = CodexExecResult(
+                    return_code=startup_rc,
+                    command=tuple(cmd),
+                    stdout="",
+                    stderr="",
+                    final_message=None,
+                )
+                self._emit_event(
+                    event_type="live.startup_failed",
+                    operation=operation,
+                    attempt=attempt,
+                    command=tuple(cmd),
+                    session_name=session_name,
+                    session_id=session_id,
+                    return_code=startup_rc,
+                    message="process exited during startup probe",
+                )
+
+                if self._should_retry(attempt=attempt, result=probe_result, retry_started_at=retry_started_at):
+                    self._best_effort_collect_sync_process(process)
+                    retry_delay = self._compute_retry_delay(attempt=attempt, retry_started_at=retry_started_at)
+                    self._emit_event(
+                        event_type="live.startup_retried",
+                        operation=operation,
+                        attempt=attempt,
+                        command=tuple(cmd),
+                        session_name=session_name,
+                        session_id=session_id,
+                        return_code=startup_rc,
+                        retry_delay_seconds=retry_delay,
+                    )
+                    self._sleep_backoff(retry_delay)
+                    attempt += 1
+                    continue
+
+            return process
+
+    async def _start_async_live_process(
+        self,
+        cmd: list[str],
+        cwd: str | None,
+        env: dict[str, str],
+        operation: str,
+        session_name: str | None,
+        session_id: str | None,
+    ) -> asyncio.subprocess.Process:
+        attempt = 1
+        retry_started_at = time.monotonic()
+
+        while True:
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    cwd=cwd,
+                    env=env,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+            except (OSError, subprocess.SubprocessError) as exc:
+                self._emit_event(
+                    event_type="live.startup_failed",
+                    operation=operation,
+                    attempt=attempt,
+                    command=tuple(cmd),
+                    session_name=session_name,
+                    session_id=session_id,
+                    message=str(exc),
+                )
+
+                if self._should_retry(attempt=attempt, exception=exc, retry_started_at=retry_started_at):
+                    retry_delay = self._compute_retry_delay(attempt=attempt, retry_started_at=retry_started_at)
+                    self._emit_event(
+                        event_type="live.startup_retried",
+                        operation=operation,
+                        attempt=attempt,
+                        command=tuple(cmd),
+                        session_name=session_name,
+                        session_id=session_id,
+                        retry_delay_seconds=retry_delay,
+                        message=str(exc),
+                    )
+                    if retry_delay > 0:
+                        await asyncio.sleep(retry_delay)
+                    attempt += 1
+                    continue
+
+                raise CodexError(f"{operation} startup failed: {exc}") from exc
+
+            startup_rc = await self._probe_async_process_exit(process, _LIVE_STARTUP_PROBE_SECONDS)
+            if startup_rc is not None:
+                probe_result = CodexExecResult(
+                    return_code=startup_rc,
+                    command=tuple(cmd),
+                    stdout="",
+                    stderr="",
+                    final_message=None,
+                )
+                self._emit_event(
+                    event_type="live.startup_failed",
+                    operation=operation,
+                    attempt=attempt,
+                    command=tuple(cmd),
+                    session_name=session_name,
+                    session_id=session_id,
+                    return_code=startup_rc,
+                    message="process exited during startup probe",
+                )
+
+                if self._should_retry(attempt=attempt, result=probe_result, retry_started_at=retry_started_at):
+                    await self._best_effort_collect_async_process(process)
+                    retry_delay = self._compute_retry_delay(attempt=attempt, retry_started_at=retry_started_at)
+                    self._emit_event(
+                        event_type="live.startup_retried",
+                        operation=operation,
+                        attempt=attempt,
+                        command=tuple(cmd),
+                        session_name=session_name,
+                        session_id=session_id,
+                        return_code=startup_rc,
+                        retry_delay_seconds=retry_delay,
+                    )
+                    if retry_delay > 0:
+                        await asyncio.sleep(retry_delay)
+                    attempt += 1
+                    continue
+
+            return process
+
+    def _probe_sync_process_exit(self, process: subprocess.Popen[str], window_seconds: float) -> int | None:
+        deadline = time.monotonic() + window_seconds
+        while time.monotonic() < deadline:
+            return_code = process.poll()
+            if return_code is not None:
+                return return_code
+            time.sleep(_LIVE_STARTUP_PROBE_INTERVAL_SECONDS)
+        return process.poll()
+
+    async def _probe_async_process_exit(self, process: asyncio.subprocess.Process, window_seconds: float) -> int | None:
+        deadline = time.monotonic() + window_seconds
+        while time.monotonic() < deadline:
+            return_code = process.returncode
+            if return_code is not None:
+                return return_code
+            await asyncio.sleep(_LIVE_STARTUP_PROBE_INTERVAL_SECONDS)
+        return process.returncode
+
+    def _best_effort_collect_sync_process(self, process: subprocess.Popen[str]) -> None:
+        try:
+            process.communicate(timeout=0.2)
+        except Exception:
+            pass
+
+    async def _best_effort_collect_async_process(self, process: asyncio.subprocess.Process) -> None:
+        try:
+            await asyncio.wait_for(process.communicate(), timeout=0.2)
+        except Exception:
+            pass
+
+    def _make_live_event_callback(
+        self,
+        operation: str,
+        command: tuple[str, ...],
+        session_name: str | None,
+        session_id: str | None,
+    ) -> Callable[[CodexEvent], None]:
+        def callback(event: CodexEvent) -> None:
+            self._emit_event(
+                event_type="live.event",
+                operation=operation,
+                command=command,
+                session_name=session_name,
+                session_id=session_id,
+                metadata={"event_type": event.type},
+            )
+
+        return callback
+
+    def _make_session_result_callback(
+        self,
+        operation: str,
+        session_name: str | None,
+        session_id: str | None,
+        prompt: str,
+    ) -> Callable[[CodexExecResult], None] | None:
+        if session_name is None or session_id is None:
+            return None
+
+        def callback(result: CodexExecResult) -> None:
+            self._update_session_record(
+                session_name=session_name,
+                session_id=session_id,
+                prompt=prompt,
+                result=result,
+                operation=operation,
+            )
+
+        return callback
+
+    def _update_session_record(
+        self,
+        session_name: str,
+        session_id: str,
+        prompt: str,
+        result: CodexExecResult,
+        operation: str,
+    ) -> None:
+        existing = self.session_store.get_record(session_name)
+        now = time.time()
+
+        if existing is None:
+            created_at = now
+            turn_count = 0
+            success_count = 0
+            failure_count = 0
+            turns: list[SessionTurnRecord] = []
+        else:
+            created_at = existing.created_at
+            turn_count = existing.turn_count
+            success_count = existing.success_count
+            failure_count = existing.failure_count
+            turns = list(existing.turns)
+
+        turn_count += 1
+        if result.ok and not result.is_turn_failed:
+            success_count += 1
+        else:
+            failure_count += 1
+
+        turns.append(
+            SessionTurnRecord(
+                timestamp=now,
+                operation=operation,
+                prompt_preview=_preview(prompt, _PROMPT_PREVIEW_LIMIT),
+                return_code=result.return_code,
+                turn_status=result.turn_status,
+                duration_seconds=result.duration_seconds,
+                message_preview=_preview(result.final_message, _MESSAGE_PREVIEW_LIMIT),
+            )
+        )
+
+        record = SessionRecord(
+            session_id=session_id,
+            session_name=session_name,
+            created_at=created_at,
+            updated_at=now,
+            last_turn_status=result.turn_status,
+            turn_count=turn_count,
+            success_count=success_count,
+            failure_count=failure_count,
+            turns=tuple(turns),
+        )
+        self.session_store.set_record(session_name, record)
+
+        self._emit_event(
+            event_type="session.updated",
+            operation=operation,
+            session_name=session_name,
+            session_id=session_id,
+            return_code=result.return_code,
+            turn_status=result.turn_status,
+            duration_seconds=result.duration_seconds,
+            metadata={
+                "turn_count": turn_count,
+                "success_count": success_count,
+                "failure_count": failure_count,
+            },
+        )
+
+    def _emit_event(
+        self,
+        event_type: str,
+        operation: str,
+        attempt: int | None = None,
+        command: tuple[str, ...] | None = None,
+        session_name: str | None = None,
+        session_id: str | None = None,
+        retry_delay_seconds: float | None = None,
+        return_code: int | None = None,
+        turn_status: str | None = None,
+        duration_seconds: float | None = None,
+        message: str | None = None,
+        metadata: dict | None = None,
+    ) -> None:
+        if self.event_hook is None:
+            return
+
+        event = CodexClientEvent(
+            type=event_type,
+            operation=operation,
+            attempt=attempt,
+            command=command,
+            session_name=session_name,
+            session_id=session_id,
+            retry_delay_seconds=retry_delay_seconds,
+            return_code=return_code,
+            turn_status=turn_status,
+            duration_seconds=duration_seconds,
+            message=message,
+            metadata=dict(metadata or {}),
+        )
+        try:
+            self.event_hook(event)
+        except Exception:
+            pass
 
     def _resolve_session_id(
         self,

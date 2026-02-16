@@ -43,7 +43,7 @@
         <span class="badge">Streaming</span>
         <h1>Live Runs and Thread Continuation</h1>
         <p>
-          Use sync or async live handles to stream events, and combine them with named sessions to build resumable multi-turn workflows.
+          Use sync or async live handles to stream events, with startup retry behavior and named-session metadata updates for resumable multi-turn workflows.
         </p>
       </section>
 
@@ -66,7 +66,7 @@ live = client.run_live(
 for event in live.iter_events():
     print(event.type)
 
-result = live.wait()
+result = live.wait(timeout=120)
 print(result.turn_status)
 print(result.final_message)</code></pre>
       </section>
@@ -89,7 +89,7 @@ async def main() -> None:
     async for event in live.iter_events():
         print(event.type)
 
-    final = await live.wait()
+    final = await live.wait(timeout=120)
     print(final.turn_status, final.final_message)
 
 
@@ -167,7 +167,7 @@ else:
         <h3>Retry Strategy for Follow-up Turns</h3>
         <p>
           Retry policy is configured on <code>CodexLocalClient</code> and applies to sync resume calls.
-          For async calls, choose explicit retry loops in your coroutine orchestration.
+          Async wrappers reuse the same retry policy semantics, and live methods retry startup failures before returning a handle.
         </p>
       </section>
 

@@ -34,6 +34,7 @@
         <a class="nav-link" href="#async-pattern">Async Pattern</a>
         <a class="nav-link" href="#retry-pattern">Retry Pattern</a>
         <a class="nav-link" href="#persistent-pattern">Persistent Session Pattern</a>
+        <a class="nav-link" href="#telemetry-pattern">Telemetry Pattern</a>
       </div>
     </aside>
 
@@ -85,7 +86,8 @@ result = client.run(
         prompt="Find architecture risks.",
         sandbox=SandboxMode.READ_ONLY,
         skip_git_repo_check=True,
-    )
+    ),
+    timeout_seconds=120,
 )</code></pre>
       </section>
 
@@ -98,7 +100,7 @@ from codex_local_sdk import CodexExecRequest, CodexLocalClient
 async def main() -> None:
     client = CodexLocalClient()
 
-    result = await client.run_async(CodexExecRequest(prompt="Analyze repo"))
+    result = await client.run_async(CodexExecRequest(prompt="Analyze repo"), timeout_seconds=120)
     print(result.final_message)
 
     live = await client.run_live_async(CodexExecRequest(prompt="Stream repo analysis", json_output=True))
@@ -122,10 +124,13 @@ client = CodexLocalClient(
         backoff_multiplier=2.0,
         max_backoff_seconds=4.0,
         retry_on_exit_codes=(7, 9),
+        jitter_ratio=0.2,
+        max_total_retry_seconds=15.0,
+        retry_on_timeouts=True,
     )
 )
 
-result = client.run(CodexExecRequest(prompt="Run resiliently"))
+result = client.run(CodexExecRequest(prompt="Run resiliently"), timeout_seconds=30)
 print(result.return_code, result.ok)</code></pre>
       </section>
 
@@ -147,12 +152,26 @@ second = client.resume(
     session_name="migration-plan",
     last=False,
     json_output=True,
+    timeout_seconds=120,
 )
 print(second.final_message)
 
 same_session = client.open_session("migration-plan")
 third = same_session.continue_prompt("Continue with test strategy", json_output=True)
 print(third.turn_status)</code></pre>
+      </section>
+
+      <section class="section" id="telemetry-pattern">
+        <h2>Telemetry Hook Pattern</h2>
+<pre><code>from codex_local_sdk import CodexClientEvent, CodexExecRequest, CodexLocalClient
+
+
+def on_event(event: CodexClientEvent) -> None:
+    print(event.type, event.operation, event.attempt, event.return_code)
+
+
+client = CodexLocalClient(event_hook=on_event)
+client.run(CodexExecRequest(prompt="Analyze repo"), timeout_seconds=60)</code></pre>
       </section>
 
       <section class="section">

@@ -1,26 +1,24 @@
 # SpawnCodex Python Local SDK
 
-This repository includes a Python SDK-style wrapper for Codex **non-interactive local execution** (`codex exec`).
+This repository provides a Python SDK-style wrapper for Codex **non-interactive local execution** (`codex exec`).
 
 ## What this gives you
 
-- Reusable Python classes for Codex execution
-- Support for plain output and JSONL event mode
-- Live streaming mode using `subprocess.Popen`
-- Async/`asyncio` API for sync and live flows
-- Session/thread continuation via `codex exec resume`
-- Pluggable session stores (in-memory + JSON file persistence)
-- Turn completion status (`completed` / `failed` / `interrupted`)
-- Schema-constrained runs (`--output-schema`)
-- Built-in retry/backoff policy for sync execution
-- Ready-to-run examples
+- Sync and async APIs for Codex execution
+- JSONL event parsing and live stream handles (sync + async)
+- Resumable sessions (`codex exec resume`) with named session persistence
+- Retry/backoff engine with jitter and timeout-aware retry controls
+- Sync timeout controls on run/resume/start methods
+- Structured observability hooks (`CodexClientEvent`)
+- Schema-constrained output support (`--output-schema`)
+- Unit tests plus real CLI integration test scaffolding
 
 Package: `codex_local_sdk`
 
-## Install prerequisites
+## Prerequisites
 
-1. Install Codex CLI (`codex`) and authenticate it.
-2. Use Python 3.10+.
+1. Python 3.10+
+2. Codex CLI installed (`codex`) and authenticated (or pass `CODEX_API_KEY` per call)
 
 Official docs:
 - Non-interactive mode: https://developers.openai.com/codex/noninteractive/
@@ -36,33 +34,9 @@ result = client.run(
     CodexExecRequest(
         prompt="Summarize this repo in 5 bullets.",
         sandbox=SandboxMode.READ_ONLY,
-    )
+    ),
+    timeout_seconds=120,
 )
-print(result.final_message)
-```
-
-## JSONL event mode
-
-```python
-result = client.run(
-    CodexExecRequest(
-        prompt="Summarize repo risks.",
-        json_output=True,
-    )
-)
-print(result.thread_id)
-print(result.turn_status)
-print(result.is_turn_completed)
-print(result.final_message)
-```
-
-## Live mode (Popen streaming)
-
-```python
-live = client.run_live(CodexExecRequest(prompt="Analyze this repo"))
-for event in live.iter_events():
-    print(event.type)
-result = live.wait()
 print(result.final_message)
 ```
 
@@ -75,10 +49,16 @@ from codex_local_sdk import CodexExecRequest, CodexLocalClient
 
 async def main() -> None:
     client = CodexLocalClient()
-    result = await client.run_async(CodexExecRequest(prompt="Summarize this repo"))
+
+    result = await client.run_async(
+        CodexExecRequest(prompt="Summarize this repository."),
+        timeout_seconds=120,
+    )
     print(result.final_message)
 
-    live = await client.run_live_async(CodexExecRequest(prompt="Stream events", json_output=True))
+    live = await client.run_live_async(
+        CodexExecRequest(prompt="Stream event types", json_output=True)
+    )
     async for event in live.iter_events():
         print(event.type)
     final = await live.wait()
@@ -88,29 +68,7 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-## Thread/session continuation
-
-```python
-session, first = client.start_thread("Analyze this repository.")
-next_result = session.continue_prompt("Continue with step 1.")
-print(session.session_id)
-print(next_result.is_turn_completed)
-```
-
-## Persistent session store
-
-```python
-from codex_local_sdk import CodexLocalClient, JsonFileSessionStore
-
-store = JsonFileSessionStore(".codex_sessions.json")
-client = CodexLocalClient(session_store=store)
-
-session, _ = client.start_thread("Start plan", session_name="plan")
-result = client.resume("Continue", session_name="plan", last=False, json_output=True)
-print(session.session_id, result.turn_status)
-```
-
-## Retry/backoff policy
+## Retry/backoff policy (jitter + timeout behavior)
 
 ```python
 from codex_local_sdk import CodexExecRequest, CodexLocalClient, RetryPolicy
@@ -121,12 +79,54 @@ client = CodexLocalClient(
         initial_backoff_seconds=0.5,
         backoff_multiplier=2.0,
         max_backoff_seconds=4.0,
-        # None means retry any non-zero exit code
-        retry_on_exit_codes=None,
+        retry_on_exit_codes=None,      # retry any non-zero exit code
+        jitter_ratio=0.2,              # +/-20% jitter
+        max_total_retry_seconds=10.0,  # cap total retry window
+        retry_on_timeouts=True,
     )
 )
 
-result = client.run(CodexExecRequest(prompt="Do work"))
+result = client.run(CodexExecRequest(prompt="Do work"), timeout_seconds=30)
+```
+
+## Persistent session store + metadata records
+
+```python
+from codex_local_sdk import CodexLocalClient, JsonFileSessionStore
+
+store = JsonFileSessionStore(".codex_sessions.json")
+client = CodexLocalClient(session_store=store)
+
+session, _ = client.start_thread(
+    "Create an initial plan",
+    session_name="repo-plan",
+    timeout_seconds=120,
+)
+
+result = client.resume(
+    "Continue with concrete tasks",
+    session_name="repo-plan",
+    last=False,
+    json_output=True,
+    timeout_seconds=120,
+)
+
+record = client.get_session_record("repo-plan")
+print(session.session_id, result.turn_status, record.turn_count if record else None)
+```
+
+## Observability hook
+
+```python
+from codex_local_sdk import CodexClientEvent, CodexExecRequest, CodexLocalClient
+
+
+def on_event(event: CodexClientEvent) -> None:
+    print(event.type, event.operation, event.attempt, event.return_code)
+
+
+client = CodexLocalClient(event_hook=on_event)
+client.run(CodexExecRequest(prompt="Analyze repo"), timeout_seconds=60)
 ```
 
 ## Schema-constrained output
@@ -143,6 +143,7 @@ result = client.run_with_schema(
     prompt="Extract project metadata.",
     schema=schema,
     output_json_path="project_metadata.json",
+    timeout_seconds=120,
 )
 ```
 
@@ -156,8 +157,20 @@ result = client.run_with_schema(
 - `examples/run_async.py`
 - `examples/run_persistent_session_store.py`
 
-## Test
+## Unit tests
 
 ```bash
 python3 -m unittest discover -s tests -p "test_*.py"
 ```
+
+## Integration tests (real Codex CLI)
+
+```bash
+export CODEX_INTEGRATION=1
+export CODEX_API_KEY=your_key_here  # optional if local Codex auth session already exists
+python3 -m unittest discover -s tests/integration -p "test_*.py"
+```
+
+CI workflows:
+- `.github/workflows/unit.yml` runs on push/PR
+- `.github/workflows/integration.yml` is manual (`workflow_dispatch`) and secret-gated

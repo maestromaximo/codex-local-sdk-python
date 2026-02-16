@@ -64,6 +64,10 @@
           <p>Use <code>RetryPolicy</code> on <code>CodexLocalClient</code> for built-in backoff retries.</p>
         </article>
         <article class="card">
+          <h3>Telemetry Hooks</h3>
+          <p>Use <code>event_hook</code> to capture structured command/retry/live/session events.</p>
+        </article>
+        <article class="card">
           <h3>Persistent Sessions</h3>
           <p>Use <code>JsonFileSessionStore</code> with session names to resume across process restarts.</p>
         </article>
@@ -79,8 +83,10 @@
           <li>Typed request/result models with thread IDs, turn status, usage, and helper properties.</li>
           <li>Sync and async execution methods for run/resume/thread flows.</li>
           <li>Live streaming support for both <code>subprocess.Popen</code> and asyncio subprocess APIs.</li>
-          <li>Retry/backoff policy for sync command execution via <code>RetryPolicy</code>.</li>
+          <li>Retry/backoff policy with jitter, timeout handling, and total retry-window limits.</li>
           <li>Pluggable session stores: in-memory and JSON-file persistence.</li>
+          <li>Session metadata records with bounded turn history and legacy-file migration.</li>
+          <li>Structured observability events via <code>CodexClientEvent</code> + <code>event_hook</code>.</li>
           <li>Large unit test suite covering sync, live, async, retries, and session-store behavior.</li>
         </ul>
       </section>
@@ -90,14 +96,15 @@
         <pre><code>from codex_local_sdk import CodexExecRequest, CodexLocalClient, RetryPolicy, SandboxMode
 
 client = CodexLocalClient(
-    retry_policy=RetryPolicy(max_attempts=3, initial_backoff_seconds=0.5),
+    retry_policy=RetryPolicy(max_attempts=3, initial_backoff_seconds=0.5, jitter_ratio=0.2),
 )
 
 result = client.run(
     CodexExecRequest(
         prompt="Summarize this repository in 5 bullets.",
         sandbox=SandboxMode.READ_ONLY,
-    )
+    ),
+    timeout_seconds=120,
 )
 print(result.final_message)</code></pre>
         <p class="muted">See full setup on the <a href="getting-started.html">Getting Started</a> page.</p>

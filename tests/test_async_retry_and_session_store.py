@@ -61,7 +61,12 @@ class TestRetryAndSessionStore(unittest.TestCase):
         ]
 
         client = CodexLocalClient(
-            retry_policy=RetryPolicy(max_attempts=3, initial_backoff_seconds=0.25, backoff_multiplier=2.0),
+            retry_policy=RetryPolicy(
+                max_attempts=3,
+                initial_backoff_seconds=0.25,
+                backoff_multiplier=2.0,
+                jitter_ratio=0.0,
+            ),
         )
         result = client.run(CodexExecRequest(prompt="hello"))
 

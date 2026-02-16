@@ -3,7 +3,14 @@
 from .client import AsyncCodexLiveRun, CodexLiveRun, CodexLocalClient, CodexThreadSession
 from .exceptions import CodexError, CodexExecFailedError, CodexNotInstalledError
 from .models import CodexEvent, CodexExecRequest, CodexExecResult, RetryPolicy, SandboxMode
-from .session_store import InMemorySessionStore, JsonFileSessionStore, SessionStore
+from .session_store import (
+    InMemorySessionStore,
+    JsonFileSessionStore,
+    SessionRecord,
+    SessionStore,
+    SessionTurnRecord,
+)
+from .telemetry import CodexClientEvent
 
 __all__ = [
     "CodexLiveRun",
@@ -20,5 +27,8 @@ __all__ = [
     "SandboxMode",
     "InMemorySessionStore",
     "JsonFileSessionStore",
+    "SessionRecord",
+    "SessionTurnRecord",
     "SessionStore",
+    "CodexClientEvent",
 ]

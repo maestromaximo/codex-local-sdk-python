@@ -36,6 +36,9 @@ class RetryPolicy:
     backoff_multiplier: float = 2.0
     max_backoff_seconds: float = 8.0
     retry_on_exit_codes: tuple[int, ...] | None = None
+    jitter_ratio: float = 0.2
+    max_total_retry_seconds: float | None = None
+    retry_on_timeouts: bool = True
 
 
 @dataclass(frozen=True)

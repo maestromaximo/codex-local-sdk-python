@@ -32,7 +32,7 @@
         <a class="nav-link" href="#test-suite">Current Suite</a>
         <a class="nav-link" href="#run-tests">Run Tests</a>
         <a class="nav-link" href="#coverage-focus">Coverage Focus</a>
-        <a class="nav-link" href="#new-tests">Add New Tests</a>
+        <a class="nav-link" href="#integration">Integration Tests</a>
         <a class="nav-link" href="#ci-guidance">CI Guidance</a>
       </div>
     </aside>
@@ -42,105 +42,68 @@
         <span class="badge">Quality</span>
         <h1>Testing and Quality Guide</h1>
         <p>
-          The suite uses <code>unittest</code> with mocks for subprocess calls and includes dedicated coverage for async,
-          retries/backoff, and session store persistence.
+          The suite is based on <code>unittest</code> and covers sync/async execution, retries/timeouts, live startup retries,
+          session metadata persistence, migration, locking, and observability hooks.
         </p>
       </section>
 
       <section class="section" id="run-tests">
-        <h2>Run the Test Suite</h2>
+        <h2>Run Unit Tests</h2>
 <pre><code>python3 -m unittest discover -s tests -p "test_*.py"</code></pre>
-        <p>Key suite files:</p>
+        <p>Key files:</p>
         <ul>
           <li><code>tests/test_codex_local_sdk.py</code></li>
           <li><code>tests/test_client_sync_extended.py</code></li>
           <li><code>tests/test_client_live_extended.py</code></li>
           <li><code>tests/test_models_and_sessions_extended.py</code></li>
           <li><code>tests/test_async_retry_and_session_store.py</code></li>
+          <li><code>tests/test_v2_hardening.py</code></li>
         </ul>
       </section>
 
       <section class="section" id="coverage-focus">
-        <h2>Current Coverage Focus</h2>
+        <h2>Coverage Focus</h2>
         <div class="table-wrap">
           <table>
             <thead>
-              <tr><th>Area</th><th>What is tested</th><th>Why it matters</th></tr>
+              <tr><th>Area</th><th>Scenarios</th><th>Outcome</th></tr>
             </thead>
             <tbody>
-              <tr><td>Command assembly</td><td>Flags like <code>--json</code>, <code>--model</code>, <code>--sandbox</code>, <code>--full-auto</code>, <code>--ephemeral</code>.</td><td>Prevents silent CLI misconfiguration.</td></tr>
-              <tr><td>JSON event extraction</td><td>Thread id, final message, turn status, usage parsing from JSONL stdout.</td><td>Ensures reliable orchestration metadata.</td></tr>
-              <tr><td>Live + async live</td><td><code>run_live()</code> and <code>run_live_async()</code> flows, event streaming, and final result parsing.</td><td>Guarantees stream semantics for sync and asyncio runtimes.</td></tr>
-              <tr><td>Retry/backoff policy</td><td>Retry-on-success, retry filter by exit code, exhaustion behavior.</td><td>Ensures resilient sync execution without hidden loops.</td></tr>
-              <tr><td>Session stores</td><td>In-memory and JSON-file persistence, start/resume by session name.</td><td>Validates resumability across process restarts.</td></tr>
+              <tr><td>Retry engine</td><td>Exit-code retries, jitter behavior, max retry window cutoff.</td><td>Backoff behavior is deterministic and bounded.</td></tr>
+              <tr><td>Timeout support</td><td>Timeout result generation, retry-on-timeout enabled/disabled.</td><td>Timeout path is explicit and policy-driven.</td></tr>
+              <tr><td>Live startup retries</td><td>Launch exception retry, immediate-exit retry, no retry post-handle return.</td><td>Startup resilience without post-stream side effects.</td></tr>
+              <tr><td>Session metadata</td><td>Record updates, bounded history truncation, named-session continuation.</td><td>Persistent records remain compact and useful.</td></tr>
+              <tr><td>Migration + locking</td><td>Legacy file auto-migration, concurrent writer safety checks.</td><td>JSON store remains valid and forward-compatible.</td></tr>
+              <tr><td>Telemetry hooks</td><td>Attempt/retry/live/session events, hook exception swallowing.</td><td>Observability is rich and non-disruptive.</td></tr>
             </tbody>
           </table>
         </div>
       </section>
 
-      <section class="section" id="new-tests">
-        <h2>Add New Tests</h2>
-        <h3>Pattern: Retry Policy</h3>
-<pre><code>@patch("codex_local_sdk.client.shutil.which", return_value="/usr/bin/codex")
-@patch("codex_local_sdk.client.time.sleep")
-@patch("codex_local_sdk.client.subprocess.run")
-def test_retry_until_success(mock_run, mock_sleep, _mock_which):
-    mock_run.side_effect = [
-        SimpleNamespace(returncode=7, stdout="", stderr="tmp"),
-        SimpleNamespace(returncode=0, stdout="ok", stderr=""),
-    ]
-    client = CodexLocalClient(retry_policy=RetryPolicy(max_attempts=3))
-    result = client.run(CodexExecRequest(prompt="x"))
-
-    assert result.ok
-    assert mock_run.call_count == 2
-    mock_sleep.assert_called_once()</code></pre>
-
-        <h3>Pattern: Async Live</h3>
-<pre><code>class TestAsyncApi(unittest.IsolatedAsyncioTestCase):
-    async def test_run_live_async(self):
-        # patch asyncio.create_subprocess_exec with fake process
-        live = await client.run_live_async(CodexExecRequest(prompt="x", json_output=True))
-        events = [event async for event in live.iter_events()]
-        result = await live.wait()
-
-        assert len(events) > 0
-        assert result.is_turn_terminal</code></pre>
-
-        <h3>Pattern: Session Store Persistence</h3>
-<pre><code>def test_json_file_store_roundtrip(tmp_path):
-    store = JsonFileSessionStore(str(tmp_path / "sessions.json"))
-    store.set("plan", "thread-1")
-    assert store.get("plan") == "thread-1"
-
-    store.delete("plan")
-    assert store.get("plan") is None</code></pre>
+      <section class="section" id="integration">
+        <h2>Real CLI Integration Tests</h2>
+        <p>Integration tests run real <code>codex exec</code> commands and are intentionally gated.</p>
+<pre><code>export CODEX_INTEGRATION=1
+export CODEX_API_KEY=your_key_here  # optional if local Codex auth session is already valid
+python3 -m unittest discover -s tests/integration -p "test_*.py"</code></pre>
+        <p>Integration test module:</p>
+        <ul>
+          <li><code>tests/integration/test_codex_cli_integration.py</code></li>
+        </ul>
       </section>
 
       <section class="section" id="ci-guidance">
         <h2>CI Guidance</h2>
         <ul>
-          <li>Keep tests hermetic: mock CLI invocation and never require real Codex auth in unit tests.</li>
-          <li>Run full unit suite on every pull request.</li>
-          <li>Add integration smoke tests only in controlled environments with secure credentials.</li>
-          <li>Include both <code>raise_on_error=True</code> and <code>False</code> paths for new command code.</li>
-          <li>For async changes, add at least one <code>IsolatedAsyncioTestCase</code> scenario.</li>
+          <li><code>.github/workflows/unit.yml</code>: runs full unit suite on push and pull request.</li>
+          <li><code>.github/workflows/integration.yml</code>: manual <code>workflow_dispatch</code> run, secret-gated by <code>CODEX_API_KEY</code>.</li>
+          <li>Keep unit tests hermetic (mock CLI interactions).</li>
+          <li>Run integration tests only in controlled environments with secure credentials.</li>
+          <li>Document every new public API with tests covering success and failure paths.</li>
         </ul>
       </section>
 
-      <section class="section">
-        <h2>Quality Checklist</h2>
-        <ul>
-          <li>New public methods documented in <code>api-reference.html</code>.</li>
-          <li>At least one runnable example added/updated in <code>examples/</code>.</li>
-          <li>Tests include success, failure, and edge-path assertions.</li>
-          <li>No secrets in examples, docs, fixtures, or committed session files.</li>
-        </ul>
-      </section>
-
-      <footer class="footer">
-        See <code>tests/test_async_retry_and_session_store.py</code> for async/retry/store baseline coverage.
-      </footer>
+      <footer class="footer">Quality baseline now includes SDK v2 hardening coverage.</footer>
     </main>
   </div>
 </body>
