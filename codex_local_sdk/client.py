@@ -1,3 +1,5 @@
+"""Client implementations for running non-interactive Codex CLI flows."""
+
 from __future__ import annotations
 
 import asyncio
@@ -26,6 +28,7 @@ _LIVE_STARTUP_PROBE_INTERVAL_SECONDS = 0.01
 
 
 def _parse_event_line(line: str) -> CodexEvent | None:
+    """Parse a single JSONL line into a `CodexEvent` when possible."""
     payload: dict
     try:
         payload = json.loads(line)
@@ -36,6 +39,7 @@ def _parse_event_line(line: str) -> CodexEvent | None:
 
 
 def _parse_jsonl_events(stdout: str) -> tuple[CodexEvent, ...]:
+    """Parse all JSONL events found in command stdout."""
     events: list[CodexEvent] = []
     for line in stdout.splitlines():
         stripped = line.strip()
@@ -48,6 +52,7 @@ def _parse_jsonl_events(stdout: str) -> tuple[CodexEvent, ...]:
 
 
 def _extract_thread_id(events: tuple[CodexEvent, ...]) -> str | None:
+    """Extract a thread id from parsed events using known payload shapes."""
     for event in events:
         if event.type != "thread.started":
             continue
@@ -66,6 +71,7 @@ def _extract_thread_id(events: tuple[CodexEvent, ...]) -> str | None:
 
 
 def _extract_turn_status_and_usage(events: tuple[CodexEvent, ...]) -> tuple[str | None, dict | None]:
+    """Derive final turn status and usage metadata from parsed events."""
     status: str | None = None
     usage: dict | None = None
 
@@ -103,6 +109,7 @@ def _extract_final_message(
     events: tuple[CodexEvent, ...],
     json_output: bool,
 ) -> str | None:
+    """Extract the most relevant final assistant message from command output."""
     if not json_output:
         stripped = stdout.strip()
         return stripped or None
@@ -127,6 +134,7 @@ def _build_result(
     duration_seconds: float,
     json_output: bool,
 ) -> CodexExecResult:
+    """Build a normalized `CodexExecResult` from raw subprocess output."""
     events: tuple[CodexEvent, ...] = ()
     if json_output:
         events = _parse_jsonl_events(stdout)
@@ -149,6 +157,7 @@ def _build_result(
 
 
 def _coerce_subprocess_output(value: object) -> str:
+    """Convert timeout exception stdout/stderr fields into text."""
     if value is None:
         return ""
     if isinstance(value, str):
@@ -159,6 +168,7 @@ def _coerce_subprocess_output(value: object) -> str:
 
 
 def _preview(text: str | None, limit: int) -> str | None:
+    """Return a trimmed preview string bounded by `limit` characters."""
     if text is None:
         return None
     stripped = text.strip()
@@ -170,7 +180,18 @@ def _preview(text: str | None, limit: int) -> str | None:
 
 
 class CodexLiveRun:
-    """Represents an active `codex exec --json` process started with Popen."""
+    """Represents an active sync live run started with `subprocess.Popen`.
+
+    Use this handle when you need streaming JSON events from Codex:
+    1. Call `iter_events()` to process events as they arrive.
+    2. Call `wait()` or `result()` to get the terminal `CodexExecResult`.
+
+    Example:
+        live = client.run_live(CodexExecRequest(prompt="Explain repo", json_output=True))
+        for event in live.iter_events():
+            print(event.type)
+        result = live.wait()
+    """
 
     def __init__(
         self,
@@ -181,6 +202,7 @@ class CodexLiveRun:
         event_callback: Callable[[CodexEvent], None] | None = None,
         result_callback: Callable[[CodexExecResult], None] | None = None,
     ) -> None:
+        """Create a live-run handle around an already-started subprocess."""
         self._process = process
         self.command = tuple(command)
         self._started_at = started_at
@@ -201,22 +223,30 @@ class CodexLiveRun:
 
     @property
     def pid(self) -> int:
+        """Return the subprocess PID."""
         return self._process.pid
 
     @property
     def events(self) -> tuple[CodexEvent, ...]:
+        """Return events consumed so far."""
         return tuple(self._events)
 
     @property
     def is_complete(self) -> bool:
+        """Return `True` when the process has exited."""
         return self._process.poll() is not None
 
     @property
     def return_code(self) -> int | None:
+        """Return the process return code, or `None` while running."""
         return self._process.poll()
 
     def iter_events(self) -> Iterator[CodexEvent]:
-        """Yield JSONL events as they arrive while the process is running."""
+        """Yield parsed events from stdout as they arrive.
+
+        This consumes live stdout. After it has been fully consumed once, repeated
+        calls yield nothing.
+        """
         if self._stdout_consumed:
             return
 
@@ -237,16 +267,29 @@ class CodexLiveRun:
         self._stdout_consumed = True
 
     def wait(self, timeout: float | None = None) -> CodexExecResult:
+        """Wait for process completion and return the parsed terminal result.
+
+        Raises:
+            subprocess.TimeoutExpired: If `timeout` elapses before completion.
+        """
         self._process.wait(timeout=timeout)
         return self.result()
 
     def terminate(self) -> None:
+        """Send a graceful termination signal to the process."""
         self._process.terminate()
 
     def kill(self) -> None:
+        """Force-kill the process."""
         self._process.kill()
 
     def result(self) -> CodexExecResult:
+        """Return the terminal parsed result for this live run.
+
+        `result()` may only be called after the process exits. If `raise_on_error`
+        was enabled on the parent client and exit code is non-zero, this raises
+        `CodexExecFailedError`.
+        """
         if self._result_cache is not None:
             return self._result_cache
 
@@ -283,6 +326,7 @@ class CodexLiveRun:
         return result
 
     def _record_stdout_line(self, line: str) -> None:
+        """Store one stdout line and emit parsed event callbacks."""
         self._stdout_lines.append(line)
         event = _parse_event_line(line.strip())
         if event is not None:
@@ -294,6 +338,7 @@ class CodexLiveRun:
                     pass
 
     def _consume_remaining_stdout(self) -> None:
+        """Drain stdout after completion if event streaming stopped early."""
         if self._stdout_consumed:
             return
 
@@ -304,6 +349,7 @@ class CodexLiveRun:
         self._stdout_consumed = True
 
     def _drain_stderr(self) -> None:
+        """Continuously drain stderr on a background thread."""
         if self._process.stderr is None:
             return
         for line in self._process.stderr:
@@ -311,7 +357,14 @@ class CodexLiveRun:
 
 
 class AsyncCodexLiveRun:
-    """Async live run handle backed by asyncio subprocess APIs."""
+    """Represents an active async live run backed by asyncio subprocess APIs.
+
+    Example:
+        live = await client.run_live_async(CodexExecRequest(prompt="Inspect tests"))
+        async for event in live.iter_events():
+            print(event.type)
+        result = await live.wait()
+    """
 
     def __init__(
         self,
@@ -322,6 +375,7 @@ class AsyncCodexLiveRun:
         event_callback: Callable[[CodexEvent], None] | None = None,
         result_callback: Callable[[CodexExecResult], None] | None = None,
     ) -> None:
+        """Create an async live-run handle around an already-started process."""
         self._process = process
         self.command = tuple(command)
         self._started_at = started_at
@@ -341,22 +395,30 @@ class AsyncCodexLiveRun:
 
     @property
     def pid(self) -> int | None:
+        """Return the subprocess PID when available."""
         return self._process.pid
 
     @property
     def events(self) -> tuple[CodexEvent, ...]:
+        """Return events consumed so far."""
         return tuple(self._events)
 
     @property
     def is_complete(self) -> bool:
+        """Return `True` when the process has exited."""
         return self._process.returncode is not None
 
     @property
     def return_code(self) -> int | None:
+        """Return the process return code, or `None` while running."""
         return self._process.returncode
 
     async def iter_events(self) -> AsyncIterator[CodexEvent]:
-        """Yield JSONL events as they arrive while the async process is running."""
+        """Yield parsed events from stdout as they arrive.
+
+        This consumes live stdout. After it has been fully consumed once, repeated
+        calls yield nothing.
+        """
         if self._stdout_consumed:
             return
 
@@ -375,6 +437,11 @@ class AsyncCodexLiveRun:
         self._stdout_consumed = True
 
     async def wait(self, timeout: float | None = None) -> CodexExecResult:
+        """Wait for process completion and return the parsed terminal result.
+
+        Raises:
+            asyncio.TimeoutError: If `timeout` elapses before completion.
+        """
         if timeout is None:
             await self._process.wait()
         else:
@@ -382,12 +449,20 @@ class AsyncCodexLiveRun:
         return await self.result()
 
     def terminate(self) -> None:
+        """Send a graceful termination signal to the process."""
         self._process.terminate()
 
     def kill(self) -> None:
+        """Force-kill the process."""
         self._process.kill()
 
     async def result(self) -> CodexExecResult:
+        """Return the terminal parsed result for this live run.
+
+        `result()` may only be called after the process exits. If `raise_on_error`
+        was enabled on the parent client and exit code is non-zero, this raises
+        `CodexExecFailedError`.
+        """
         if self._result_cache is not None:
             return self._result_cache
 
@@ -427,6 +502,7 @@ class AsyncCodexLiveRun:
         return result
 
     def _record_stdout_line(self, line: bytes) -> None:
+        """Store one stdout line and emit parsed event callbacks."""
         text = line.decode("utf-8", errors="replace")
         self._stdout_lines.append(text)
         event = _parse_event_line(text.strip())
@@ -439,6 +515,7 @@ class AsyncCodexLiveRun:
                     pass
 
     async def _consume_remaining_stdout(self) -> None:
+        """Drain stdout after completion if event streaming stopped early."""
         if self._stdout_consumed:
             return
 
@@ -452,6 +529,7 @@ class AsyncCodexLiveRun:
         self._stdout_consumed = True
 
     async def _drain_stderr(self) -> None:
+        """Continuously drain stderr in an asyncio task."""
         if self._process.stderr is None:
             return
 
@@ -463,7 +541,15 @@ class AsyncCodexLiveRun:
 
 
 class CodexThreadSession:
-    """Represents a resumable non-interactive Codex exec session (thread)."""
+    """Convenience handle for continuing a previously started Codex thread.
+
+    You usually get this from `CodexLocalClient.start_thread()` or
+    `CodexLocalClient.open_session()`.
+
+    Example:
+        session, first = client.start_thread("Create a plan", session_name="planning")
+        follow_up = session.continue_prompt("Now write the implementation.")
+    """
 
     def __init__(
         self,
@@ -473,6 +559,7 @@ class CodexThreadSession:
         api_key: str | None = None,
         session_name: str | None = None,
     ) -> None:
+        """Create a lightweight handle for a resumable Codex thread."""
         self.client = client
         self.session_id = session_id
         self.default_cwd = default_cwd
@@ -489,6 +576,10 @@ class CodexThreadSession:
         all_sessions: bool = False,
         timeout_seconds: float | None = None,
     ) -> CodexExecResult:
+        """Run a non-live follow-up prompt on this session.
+
+        By default, this uses JSON output for structured terminal metadata.
+        """
         result = self.client.resume(
             prompt=prompt,
             session_id=self.session_id if self.session_name is None else None,
@@ -513,6 +604,7 @@ class CodexThreadSession:
         all_sessions: bool = False,
         timeout_seconds: float | None = None,
     ) -> CodexExecResult:
+        """Async variant of `continue_prompt`."""
         result = await self.client.resume_async(
             prompt=prompt,
             session_id=self.session_id if self.session_name is None else None,
@@ -535,6 +627,10 @@ class CodexThreadSession:
         api_key: str | None = None,
         all_sessions: bool = False,
     ) -> CodexLiveRun:
+        """Start a live follow-up prompt for this session.
+
+        Live mode always uses JSON output so events can be streamed.
+        """
         return self.client.resume_live(
             prompt=prompt,
             session_id=self.session_id if self.session_name is None else None,
@@ -553,6 +649,7 @@ class CodexThreadSession:
         api_key: str | None = None,
         all_sessions: bool = False,
     ) -> AsyncCodexLiveRun:
+        """Async variant of `continue_live`."""
         return await self.client.resume_live_async(
             prompt=prompt,
             session_id=self.session_id if self.session_name is None else None,
@@ -566,11 +663,23 @@ class CodexThreadSession:
 
     @property
     def is_last_turn_complete(self) -> bool:
+        """Return whether the latest stored result completed successfully."""
         return self.last_result is not None and self.last_result.is_turn_completed
 
 
 class CodexLocalClient:
-    """High-level wrapper around `codex exec` for local non-interactive usage."""
+    """High-level wrapper around `codex exec` for local non-interactive usage.
+
+    Typical workflow:
+    1. Build a request (`CodexExecRequest`) or use a convenience method.
+    2. Run once (`run*`) or start/resume a thread (`start_thread*`, `resume*`).
+    3. Optionally persist session names with `save_session` and `open_session`.
+
+    Example:
+        client = CodexLocalClient()
+        result = client.run_prompt("Summarize README", json_output=True)
+        print(result.final_message)
+    """
 
     def __init__(
         self,
@@ -582,6 +691,17 @@ class CodexLocalClient:
         session_store: SessionStore | None = None,
         event_hook: Callable[[CodexClientEvent], None] | None = None,
     ) -> None:
+        """Configure a Codex client with defaults for execution and retries.
+
+        Args:
+            codex_bin: CLI executable name or path.
+            default_cwd: Working directory fallback when a request does not set `cwd`.
+            default_env: Extra environment variables merged into child process env.
+            raise_on_error: Raise `CodexExecFailedError` on non-zero command exits.
+            retry_policy: Retry/backoff settings for non-live command execution.
+            session_store: Named-session persistence backend.
+            event_hook: Optional callback for best-effort telemetry events.
+        """
         self.codex_bin = codex_bin
         self.default_cwd = default_cwd
         self.default_env = dict(default_env or {})
@@ -591,6 +711,7 @@ class CodexLocalClient:
         self.event_hook = event_hook
 
     def is_available(self) -> bool:
+        """Return `True` when the configured Codex binary is on PATH."""
         return shutil.which(self.codex_bin) is not None
 
     def run(
@@ -599,6 +720,12 @@ class CodexLocalClient:
         api_key: str | None = None,
         timeout_seconds: float | None = None,
     ) -> CodexExecResult:
+        """Execute a fully specified request.
+
+        Retries follow `retry_policy`. If `raise_on_error=True`, non-zero exits
+        raise `CodexExecFailedError`; otherwise the failed `CodexExecResult`
+        is returned.
+        """
         cmd = self._build_exec_command(request)
         return self._run_raw_command(
             cmd=cmd,
@@ -616,6 +743,7 @@ class CodexLocalClient:
         api_key: str | None = None,
         timeout_seconds: float | None = None,
     ) -> CodexExecResult:
+        """Async wrapper for `run` that delegates to a worker thread."""
         return await asyncio.to_thread(self.run, request, api_key, timeout_seconds)
 
     def run_live(self, request: CodexExecRequest, api_key: str | None = None) -> CodexLiveRun:
@@ -623,6 +751,7 @@ class CodexLocalClient:
         Start a live run with subprocess.Popen and stream events.
 
         Live mode always uses `--json` so events can be streamed and parsed.
+        Retry behavior is limited to startup failures before a live handle exists.
         """
         if not self.is_available():
             raise CodexNotInstalledError(
@@ -668,6 +797,7 @@ class CodexLocalClient:
         )
 
     async def run_live_async(self, request: CodexExecRequest, api_key: str | None = None) -> AsyncCodexLiveRun:
+        """Async variant of `run_live` with startup-only retry behavior."""
         if not self.is_available():
             raise CodexNotInstalledError(
                 f"Could not find `{self.codex_bin}` in PATH. Install Codex CLI first."
@@ -718,6 +848,10 @@ class CodexLocalClient:
         timeout_seconds: float | None = None,
         **kwargs: object,
     ) -> CodexExecResult:
+        """Execute a prompt without manually constructing `CodexExecRequest`.
+
+        Keyword arguments map directly to `CodexExecRequest` fields.
+        """
         request = CodexExecRequest(prompt=prompt)
         request = replace(request, **kwargs)
         return self.run(request, api_key=api_key, timeout_seconds=timeout_seconds)
@@ -729,6 +863,7 @@ class CodexLocalClient:
         timeout_seconds: float | None = None,
         **kwargs: object,
     ) -> CodexExecResult:
+        """Async variant of `run_prompt`."""
         return await asyncio.to_thread(
             self.run_prompt,
             prompt,
@@ -746,6 +881,11 @@ class CodexLocalClient:
         timeout_seconds: float | None = None,
         **kwargs: object,
     ) -> CodexExecResult:
+        """Run a prompt with schema-constrained output.
+
+        The schema is written to a temporary file and passed via
+        `--output-schema`, then cleaned up automatically.
+        """
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
             json.dump(schema, f)
             schema_path = f.name
@@ -774,6 +914,7 @@ class CodexLocalClient:
         timeout_seconds: float | None = None,
         **kwargs: object,
     ) -> CodexExecResult:
+        """Async variant of `run_with_schema`."""
         return await asyncio.to_thread(
             self.run_with_schema,
             prompt,
@@ -793,9 +934,11 @@ class CodexLocalClient:
         **request_overrides: object,
     ) -> tuple[CodexThreadSession, CodexExecResult]:
         """
-        Start a new session and return a `CodexThreadSession` you can continue.
+        Start a new thread and return a `CodexThreadSession` you can continue.
 
-        This enforces `json_output=True` so the session/thread ID can be captured.
+        This enforces `json_output=True` so a thread ID can be extracted.
+        Pass `session_name` to persist a logical alias in the configured
+        `session_store`.
         """
         request = CodexExecRequest(prompt=prompt, json_output=True)
         request = replace(request, **{**request_overrides, "json_output": True})
@@ -832,6 +975,7 @@ class CodexLocalClient:
         timeout_seconds: float | None = None,
         **request_overrides: object,
     ) -> tuple[CodexThreadSession, CodexExecResult]:
+        """Async variant of `start_thread`."""
         func = functools.partial(
             self.start_thread,
             prompt,
@@ -855,6 +999,10 @@ class CodexLocalClient:
         timeout_seconds: float | None = None,
         _operation: str = "resume",
     ) -> CodexExecResult:
+        """Resume an existing thread by explicit id or stored session name.
+
+        Pass exactly one of `session_id` or `session_name`.
+        """
         resolved_session_id = self._resolve_session_id(session_id=session_id, session_name=session_name)
 
         cmd = self._build_resume_command(
@@ -901,6 +1049,7 @@ class CodexLocalClient:
         timeout_seconds: float | None = None,
         _operation: str = "resume_async",
     ) -> CodexExecResult:
+        """Async variant of `resume`."""
         func = functools.partial(
             self.resume,
             prompt,
@@ -927,6 +1076,10 @@ class CodexLocalClient:
         api_key: str | None = None,
         _operation: str = "resume_live",
     ) -> CodexLiveRun:
+        """Resume a thread in live event-streaming mode.
+
+        JSON output is always enabled in live mode.
+        """
         resolved_session_id = self._resolve_session_id(session_id=session_id, session_name=session_name)
 
         cmd = self._build_resume_command(
@@ -993,6 +1146,7 @@ class CodexLocalClient:
         api_key: str | None = None,
         _operation: str = "resume_live_async",
     ) -> AsyncCodexLiveRun:
+        """Async variant of `resume_live`."""
         resolved_session_id = self._resolve_session_id(session_id=session_id, session_name=session_name)
 
         cmd = self._build_resume_command(
@@ -1049,21 +1203,31 @@ class CodexLocalClient:
         )
 
     def save_session(self, name: str, session_id: str) -> None:
+        """Persist a logical session name for later resume calls.
+
+        Use this when you want friendly aliases like `"release-planning"` instead
+        of passing raw thread IDs everywhere.
+        """
         self.session_store.set(name, session_id)
 
     def get_session_id(self, name: str) -> str | None:
+        """Return the stored session id for a logical name, if present."""
         return self.session_store.get(name)
 
     def delete_session(self, name: str) -> None:
+        """Delete a stored logical session mapping."""
         self.session_store.delete(name)
 
     def list_sessions(self) -> dict[str, str]:
+        """List all stored logical session mappings."""
         return self.session_store.all()
 
     def get_session_record(self, name: str) -> SessionRecord | None:
+        """Return full persisted metadata for a named session."""
         return self.session_store.get_record(name)
 
     def list_session_records(self) -> dict[str, SessionRecord]:
+        """Return all stored session records with metadata."""
         return self.session_store.list_records()
 
     def open_session(
@@ -1072,6 +1236,10 @@ class CodexLocalClient:
         default_cwd: str | None = None,
         api_key: str | None = None,
     ) -> CodexThreadSession:
+        """Open a `CodexThreadSession` from a previously saved session name.
+
+        This is a convenience around `get_session_id` plus `CodexThreadSession`.
+        """
         session_id = self.get_session_id(name)
         if not session_id:
             raise CodexError(f"No stored session found for name '{name}'.")
@@ -1096,6 +1264,7 @@ class CodexLocalClient:
         session_name: str | None = None,
         session_id: str | None = None,
     ) -> CodexExecResult:
+        """Execute a command with retry logic, timeout handling, and telemetry."""
         if not self.is_available():
             raise CodexNotInstalledError(
                 f"Could not find `{self.codex_bin}` in PATH. Install Codex CLI first."
@@ -1236,6 +1405,7 @@ class CodexLocalClient:
         timeout_seconds: float | None,
         exc: subprocess.TimeoutExpired,
     ) -> CodexExecResult:
+        """Build a synthetic timeout result that follows normal result shape."""
         stdout = _coerce_subprocess_output(getattr(exc, "stdout", ""))
         stderr = _coerce_subprocess_output(getattr(exc, "stderr", ""))
         timeout_label = timeout_seconds if timeout_seconds is not None else "unknown"
@@ -1252,6 +1422,7 @@ class CodexLocalClient:
         )
 
     def _is_timeout_result(self, result: CodexExecResult) -> bool:
+        """Return `True` when the result was generated from a timeout path."""
         return _TIMEOUT_MARKER in result.stderr
 
     def _should_retry(
@@ -1261,6 +1432,7 @@ class CodexLocalClient:
         exception: BaseException | None = None,
         retry_started_at: float | None = None,
     ) -> bool:
+        """Decide whether another attempt is allowed under policy constraints."""
         if attempt >= self.retry_policy.max_attempts:
             return False
 
@@ -1286,9 +1458,11 @@ class CodexLocalClient:
         return result.return_code in exit_codes
 
     def _is_retryable_exception(self, exception: BaseException) -> bool:
+        """Return whether an exception type is retryable."""
         return isinstance(exception, (OSError, subprocess.SubprocessError))
 
     def _compute_retry_delay(self, attempt: int, retry_started_at: float | None = None) -> float:
+        """Compute exponential backoff delay with jitter and max-total cap."""
         exponent = max(0, attempt - 1)
         base_delay = self.retry_policy.initial_backoff_seconds * (self.retry_policy.backoff_multiplier**exponent)
         delay = min(base_delay, self.retry_policy.max_backoff_seconds)
@@ -1309,11 +1483,13 @@ class CodexLocalClient:
         return delay
 
     def _sleep_backoff(self, seconds: float) -> None:
+        """Sleep for retry backoff if delay is positive."""
         if seconds <= 0:
             return
         time.sleep(seconds)
 
     def _normalize_retry_policy(self, retry_policy: RetryPolicy) -> RetryPolicy:
+        """Clamp retry policy values into safe, non-negative ranges."""
         max_attempts = max(1, retry_policy.max_attempts)
         initial_backoff_seconds = max(0.0, retry_policy.initial_backoff_seconds)
         backoff_multiplier = retry_policy.backoff_multiplier
@@ -1346,6 +1522,7 @@ class CodexLocalClient:
         session_name: str | None,
         session_id: str | None,
     ) -> subprocess.Popen[str]:
+        """Start sync live mode with retries limited to startup failures."""
         attempt = 1
         retry_started_at = time.monotonic()
 
@@ -1437,6 +1614,7 @@ class CodexLocalClient:
         session_name: str | None,
         session_id: str | None,
     ) -> asyncio.subprocess.Process:
+        """Async variant of `_start_sync_live_process`."""
         attempt = 1
         retry_started_at = time.monotonic()
 
@@ -1520,6 +1698,7 @@ class CodexLocalClient:
             return process
 
     def _probe_sync_process_exit(self, process: subprocess.Popen[str], window_seconds: float) -> int | None:
+        """Probe briefly for an immediate startup exit code."""
         deadline = time.monotonic() + window_seconds
         while time.monotonic() < deadline:
             return_code = process.poll()
@@ -1529,6 +1708,7 @@ class CodexLocalClient:
         return process.poll()
 
     async def _probe_async_process_exit(self, process: asyncio.subprocess.Process, window_seconds: float) -> int | None:
+        """Async variant of `_probe_sync_process_exit`."""
         deadline = time.monotonic() + window_seconds
         while time.monotonic() < deadline:
             return_code = process.returncode
@@ -1538,12 +1718,14 @@ class CodexLocalClient:
         return process.returncode
 
     def _best_effort_collect_sync_process(self, process: subprocess.Popen[str]) -> None:
+        """Drain process pipes after startup failure without raising."""
         try:
             process.communicate(timeout=0.2)
         except Exception:
             pass
 
     async def _best_effort_collect_async_process(self, process: asyncio.subprocess.Process) -> None:
+        """Async variant of `_best_effort_collect_sync_process`."""
         try:
             await asyncio.wait_for(process.communicate(), timeout=0.2)
         except Exception:
@@ -1556,6 +1738,7 @@ class CodexLocalClient:
         session_name: str | None,
         session_id: str | None,
     ) -> Callable[[CodexEvent], None]:
+        """Create a callback that forwards live-event telemetry to `event_hook`."""
         def callback(event: CodexEvent) -> None:
             self._emit_event(
                 event_type="live.event",
@@ -1575,6 +1758,7 @@ class CodexLocalClient:
         session_id: str | None,
         prompt: str,
     ) -> Callable[[CodexExecResult], None] | None:
+        """Create a callback that updates persistent session metadata."""
         if session_name is None or session_id is None:
             return None
 
@@ -1597,6 +1781,7 @@ class CodexLocalClient:
         result: CodexExecResult,
         operation: str,
     ) -> None:
+        """Append a turn summary and refresh counters for a named session."""
         existing = self.session_store.get_record(session_name)
         now = time.time()
 
@@ -1674,6 +1859,7 @@ class CodexLocalClient:
         message: str | None = None,
         metadata: dict | None = None,
     ) -> None:
+        """Emit a best-effort telemetry callback event."""
         if self.event_hook is None:
             return
 
@@ -1701,6 +1887,7 @@ class CodexLocalClient:
         session_id: str | None,
         session_name: str | None,
     ) -> str | None:
+        """Resolve explicit or stored session identifier with validation."""
         if session_id and session_name:
             raise CodexError("Pass either session_id or session_name, not both.")
 
@@ -1723,6 +1910,7 @@ class CodexLocalClient:
         all_sessions: bool,
         json_output: bool,
     ) -> list[str]:
+        """Build a `codex exec resume` CLI command."""
         cmd = [self.codex_bin, "exec", "resume"]
 
         if session_id:
@@ -1740,6 +1928,7 @@ class CodexLocalClient:
         return cmd
 
     def _build_exec_command(self, request: CodexExecRequest) -> list[str]:
+        """Build a `codex exec` command from request options."""
         cmd = [self.codex_bin, "exec"]
 
         if request.json_output:
@@ -1769,6 +1958,7 @@ class CodexLocalClient:
         return cmd
 
     def _build_env(self, api_key: str | None = None) -> dict[str, str]:
+        """Build subprocess environment merged with defaults and API key."""
         env = os.environ.copy()
         env.update(self.default_env)
         if api_key:

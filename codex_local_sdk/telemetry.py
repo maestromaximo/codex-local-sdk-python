@@ -1,3 +1,5 @@
+"""Telemetry event model used by `CodexLocalClient.event_hook`."""
+
 from __future__ import annotations
 
 import time
@@ -7,7 +9,11 @@ from typing import Any
 
 @dataclass(frozen=True)
 class CodexClientEvent:
-    """Structured event emitted by CodexLocalClient during execution."""
+    """Structured event emitted by `CodexLocalClient` during execution.
+
+    Events are delivered to `CodexLocalClient(event_hook=...)` as best effort:
+    hook exceptions are ignored and never break command execution.
+    """
 
     type: str
     operation: str

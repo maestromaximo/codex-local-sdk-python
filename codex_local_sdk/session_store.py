@@ -1,3 +1,5 @@
+"""Session store abstractions and implementations for named Codex threads."""
+
 from __future__ import annotations
 
 import json
@@ -12,6 +14,11 @@ from dataclasses import dataclass, field
 
 @dataclass(frozen=True)
 class SessionTurnRecord:
+    """Summary metadata captured for one completed SDK operation.
+
+    These records are appended to `SessionRecord.turns` as bounded history.
+    """
+
     timestamp: float
     operation: str
     prompt_preview: str | None = None
@@ -23,6 +30,12 @@ class SessionTurnRecord:
 
 @dataclass(frozen=True)
 class SessionRecord:
+    """Persistent metadata and bounded history for one named session.
+
+    This is the richer schema used by modern stores (schema v2), including
+    counters and per-turn snapshots.
+    """
+
     session_id: str
     session_name: str
     created_at: float
@@ -35,41 +48,55 @@ class SessionRecord:
 
 
 class SessionStore(ABC):
-    """Abstraction for persisting logical session-name -> codex session-id mappings."""
+    """Persistence interface for logical session-name to session-id mappings.
+
+    Implement this interface to provide custom persistence backends.
+    """
 
     @abstractmethod
     def get(self, name: str) -> str | None:
+        """Return the stored Codex session id for `name`, if any."""
         raise NotImplementedError
 
     @abstractmethod
     def set(self, name: str, session_id: str) -> None:
+        """Persist or overwrite the session id mapped to `name`."""
         raise NotImplementedError
 
     @abstractmethod
     def delete(self, name: str) -> None:
+        """Delete the mapping and metadata for `name` if present."""
         raise NotImplementedError
 
     @abstractmethod
     def all(self) -> dict[str, str]:
+        """Return all known `name -> session_id` mappings."""
         raise NotImplementedError
 
     @abstractmethod
     def get_record(self, name: str) -> SessionRecord | None:
+        """Return the full persisted record for `name`, if available."""
         raise NotImplementedError
 
     @abstractmethod
     def set_record(self, name: str, record: SessionRecord) -> None:
+        """Persist the complete record for `name`."""
         raise NotImplementedError
 
     @abstractmethod
     def list_records(self) -> dict[str, SessionRecord]:
+        """Return all named session records."""
         raise NotImplementedError
 
 
 class InMemorySessionStore(SessionStore):
-    """Thread-safe in-memory session store."""
+    """Thread-safe in-memory session store.
+
+    Useful as the default store for single-process apps and tests.
+    """
 
     def __init__(self, initial: dict[str, str] | None = None, max_turn_history: int = 20) -> None:
+        """Initialize a store with optional seed mappings and history limit."""
         self._lock = threading.Lock()
         self.max_turn_history = max(1, max_turn_history)
         now = time.time()
@@ -84,10 +111,12 @@ class InMemorySessionStore(SessionStore):
         }
 
     def get(self, name: str) -> str | None:
+        """Look up a session id by logical name."""
         record = self.get_record(name)
         return record.session_id if record is not None else None
 
     def set(self, name: str, session_id: str) -> None:
+        """Create or update a name-to-session mapping."""
         with self._lock:
             existing = self._records.get(name)
             now = time.time()
@@ -113,18 +142,22 @@ class InMemorySessionStore(SessionStore):
             )
 
     def delete(self, name: str) -> None:
+        """Remove a stored session mapping and record."""
         with self._lock:
             self._records.pop(name, None)
 
     def all(self) -> dict[str, str]:
+        """Return all mappings as a plain dictionary copy."""
         with self._lock:
             return {name: record.session_id for name, record in self._records.items()}
 
     def get_record(self, name: str) -> SessionRecord | None:
+        """Return the complete session record for `name`."""
         with self._lock:
             return self._records.get(name)
 
     def set_record(self, name: str, record: SessionRecord) -> None:
+        """Persist a record while enforcing bounded turn history."""
         with self._lock:
             turns = tuple(record.turns[-self.max_turn_history :])
             normalized = SessionRecord(
@@ -141,25 +174,39 @@ class InMemorySessionStore(SessionStore):
             self._records[name] = normalized
 
     def list_records(self) -> dict[str, SessionRecord]:
+        """Return a shallow copy of all in-memory records."""
         with self._lock:
             return dict(self._records)
 
 
 class JsonFileSessionStore(SessionStore):
-    """Thread-safe and process-safe JSON-file-backed store with schema migration."""
+    """Thread-safe and process-safe JSON-backed session store.
+
+    This store:
+    - supports legacy `{name: session_id}` migration,
+    - writes schema-v2 records atomically,
+    - uses lock files for cross-process safety.
+
+    Example:
+        store = JsonFileSessionStore(".codex/sessions.json")
+        client = CodexLocalClient(session_store=store)
+    """
 
     SCHEMA_VERSION = 2
 
     def __init__(self, file_path: str, max_turn_history: int = 20) -> None:
+        """Initialize a JSON-backed store at `file_path`."""
         self.file_path = file_path
         self.max_turn_history = max(1, max_turn_history)
         self._thread_lock = threading.Lock()
 
     def get(self, name: str) -> str | None:
+        """Look up a session id by logical name."""
         record = self.get_record(name)
         return record.session_id if record is not None else None
 
     def set(self, name: str, session_id: str) -> None:
+        """Create or update a name-to-session mapping on disk."""
         with self._acquire_locks():
             records = self._load_records_locked()
             now = time.time()
@@ -186,22 +233,26 @@ class JsonFileSessionStore(SessionStore):
             self._write_records_locked(records)
 
     def delete(self, name: str) -> None:
+        """Remove a stored session mapping and record from disk."""
         with self._acquire_locks():
             records = self._load_records_locked()
             records.pop(name, None)
             self._write_records_locked(records)
 
     def all(self) -> dict[str, str]:
+        """Return all mappings from the file-backed store."""
         with self._acquire_locks():
             records = self._load_records_locked()
             return {name: record.session_id for name, record in records.items()}
 
     def get_record(self, name: str) -> SessionRecord | None:
+        """Return a full record by name from disk."""
         with self._acquire_locks():
             records = self._load_records_locked()
             return records.get(name)
 
     def set_record(self, name: str, record: SessionRecord) -> None:
+        """Persist a complete record while enforcing bounded history."""
         with self._acquire_locks():
             records = self._load_records_locked()
             turns = tuple(record.turns[-self.max_turn_history :])
@@ -220,18 +271,21 @@ class JsonFileSessionStore(SessionStore):
             self._write_records_locked(records)
 
     def list_records(self) -> dict[str, SessionRecord]:
+        """Return all persisted records."""
         with self._acquire_locks():
             records = self._load_records_locked()
             return dict(records)
 
     @contextmanager
     def _acquire_locks(self):
+        """Hold both thread and file locks for an atomic store operation."""
         with self._thread_lock:
             with self._file_lock():
                 yield
 
     @contextmanager
     def _file_lock(self):
+        """Acquire an inter-process lock file adjacent to the JSON store."""
         lock_path = f"{self.file_path}.lock"
         parent = os.path.dirname(lock_path)
         if parent:
@@ -262,12 +316,14 @@ class JsonFileSessionStore(SessionStore):
                     fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
     def _load_records_locked(self) -> dict[str, SessionRecord]:
+        """Load records and persist migrated schema if required."""
         records, migrated = self._read_records_locked()
         if migrated:
             self._write_records_locked(records)
         return records
 
     def _read_records_locked(self) -> tuple[dict[str, SessionRecord], bool]:
+        """Read records from disk and detect whether migration is needed."""
         if not os.path.exists(self.file_path):
             return {}, False
 
@@ -308,6 +364,7 @@ class JsonFileSessionStore(SessionStore):
         return {}, False
 
     def _write_records_locked(self, records: dict[str, SessionRecord]) -> None:
+        """Atomically write schema-v2 records to disk."""
         payload = {
             "schema_version": self.SCHEMA_VERSION,
             "records": {
@@ -334,6 +391,7 @@ class JsonFileSessionStore(SessionStore):
                     pass
 
     def _parse_record(self, name: str, raw: object) -> SessionRecord | None:
+        """Parse one persisted JSON object into a `SessionRecord`."""
         if not isinstance(raw, dict):
             return None
 
@@ -373,6 +431,7 @@ class JsonFileSessionStore(SessionStore):
         )
 
     def _parse_turn(self, raw: object) -> SessionTurnRecord | None:
+        """Parse one persisted turn entry into a `SessionTurnRecord`."""
         if not isinstance(raw, dict):
             return None
 
@@ -391,6 +450,7 @@ class JsonFileSessionStore(SessionStore):
         )
 
     def _record_to_json(self, record: SessionRecord) -> dict:
+        """Convert a `SessionRecord` into JSON-serializable schema-v2 data."""
         turns = [
             {
                 "timestamp": turn.timestamp,
@@ -418,30 +478,35 @@ class JsonFileSessionStore(SessionStore):
 
     @staticmethod
     def _as_float(value: object, fallback: float) -> float:
+        """Coerce numeric values to `float` or return `fallback`."""
         if isinstance(value, (float, int)):
             return float(value)
         return fallback
 
     @staticmethod
     def _as_optional_float(value: object) -> float | None:
+        """Coerce numeric values to `float` or return `None`."""
         if isinstance(value, (float, int)):
             return float(value)
         return None
 
     @staticmethod
     def _as_int(value: object, fallback: int) -> int:
+        """Coerce integer values or return `fallback`."""
         if isinstance(value, int):
             return value
         return fallback
 
     @staticmethod
     def _as_optional_int(value: object) -> int | None:
+        """Return integer values as-is, otherwise `None`."""
         if isinstance(value, int):
             return value
         return None
 
     @staticmethod
     def _as_optional_str(value: object) -> str | None:
+        """Return string values as-is, otherwise `None`."""
         if isinstance(value, str):
             return value
         return None
