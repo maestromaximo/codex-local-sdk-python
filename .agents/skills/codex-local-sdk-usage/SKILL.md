@@ -39,3 +39,4 @@ Load only the reference file needed for the task:
 - Catch `CodexExecFailedError` when `raise_on_error=True`; inspect `exc.result`.
 - Pass `session_id` or `session_name`, never both.
 - Treat live methods (`run_live*`, `resume_live*`) as startup-retry only; once a handle is returned, caller code owns interruption/retry logic.
+- On Windows, if you hit `CodexError: ... [WinError 2]`, initialize with `CodexLocalClient(codex_bin="codex.cmd")`.
