@@ -57,10 +57,19 @@ codex-sdk docs
 
 1. Python 3.10+
 2. Codex CLI installed (`codex`) and authenticated (or pass `CODEX_API_KEY` per call)
+3. On Windows, prefer `codex_bin="codex.cmd"` when creating `CodexLocalClient`
 
 Official docs:
 - Non-interactive mode: https://developers.openai.com/codex/noninteractive/
 - CLI reference (`codex exec`): https://developers.openai.com/codex/cli/reference/#codex-exec
+
+Windows example:
+
+```python
+from codex_local_sdk import CodexLocalClient
+
+client = CodexLocalClient(codex_bin="codex.cmd")
+```
 
 ## Quick usage
 
